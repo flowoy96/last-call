@@ -191,7 +191,7 @@ async def settings_page(request: Request):
         values: dict[str, str] = {}
         errors = []
         for key in SETTING_FIELDS:
-            if key in ("schedule_enabled",):
+            if key in db.CHECKBOX_KEYS:
                 values[key] = "1" if form.get(key) else "0"
                 continue
             raw = (form.get(key) or "").strip()
@@ -208,13 +208,14 @@ async def settings_page(request: Request):
         if not re.match(r"^([01]\d|2[0-3]):[0-5]\d$", values.get("schedule_time", "")):
             errors.append("Time must be in HH:MM format")
             values.pop("schedule_time", None)
-        if values.get("schedule_weekday") not in scheduler.WEEKDAYS + ["daily"]:
+        if values.get("schedule_weekday") not in scheduler.WEEKDAYS:
             values["schedule_weekday"] = "fri"
-        if not (values.get("smtp_port") or "").isdigit():
-            errors.append("SMTP port must be a number")
-            values.pop("smtp_port", None)
-        if not (values.get("new_lookback_days") or "").isdigit():
-            values.pop("new_lookback_days", None)
+        if values.get("schedule_frequency") not in scheduler.FREQUENCIES:
+            values["schedule_frequency"] = "weekly"
+        for key in db.NUMERIC_KEYS:
+            if not (values.get(key) or "").isdigit():
+                errors.append(f"{key.replace('_', ' ')} must be a whole number")
+                values.pop(key, None)
         for key in ("smtp_from_email",):
             if values.get(key) and not EMAIL_RE.match(values[key]):
                 errors.append("Sender address is not a valid e-mail address")
@@ -340,6 +341,11 @@ def _preview_html(user_id: str) -> tuple[str, str]:
         if d.empty:
             return "", "(empty: this mail would not be sent)"
         html, _ = digest.render(d, ctx, lambda c: f"/poster/{c.poster_id}")
+        if not d.should_send(ctx.settings):
+            note = ("<div style='font-family:sans-serif;background:#3f3f46;color:#fff;padding:12px 16px'>"
+                    "Preview only: nothing is leaving and nothing is new, so this mail would <b>not</b> be sent. "
+                    "Enable \"Send when there are only suggestions\" in the settings to change that.</div>")
+            html = re.sub(r"(<body[^>]*>)", lambda m: m.group(1) + note, html, count=1)
         return html, digest.subject(d, ctx.settings)
     finally:
         ctx.jf.close()

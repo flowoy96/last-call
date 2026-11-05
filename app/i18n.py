@@ -20,6 +20,14 @@ STRINGS = {
         "new_badge": "Neu",
         "new_episodes": "{count} neue Folgen",
         "new_episode": "1 neue Folge",
+        "reco_title": "Empfehlungen für dich",
+        "reco_text": "Noch nicht gesehen, passt aber zu dem, was du gerne schaust.",
+        "reco_badge": "Für dich",
+        "rewatch_title": "Mal wieder schauen?",
+        "rewatch_text": "Filme, die du schon kennst, aber länger nicht gesehen hast.",
+        "rewatch_badge": "Schon gesehen",
+        "rewatch_last": "Zuletzt {date}",
+        "subject_suggestions": "Tipps für dich auf {server}",
         "season": "Staffel {n}",
         "watch_now": "Jetzt ansehen",
         "open_server": "{server} öffnen",
@@ -27,6 +35,8 @@ STRINGS = {
                   "Wenn du keine Mails mehr möchtest, sag einfach dem Betreiber Bescheid.",
         "test_subject": "Last Call: Testmail",
         "test_body": "Wenn du das liest, funktioniert der SMTP-Versand.",
+        "months_long": ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August",
+                        "September", "Oktober", "November", "Dezember"],
         "months": ["Jan.", "Feb.", "März", "Apr.", "Mai", "Juni", "Juli", "Aug.", "Sep.", "Okt.", "Nov.", "Dez."],
         "weekdays": ["Mo.", "Di.", "Mi.", "Do.", "Fr.", "Sa.", "So."],
     },
@@ -45,6 +55,14 @@ STRINGS = {
         "new_badge": "New",
         "new_episodes": "{count} new episodes",
         "new_episode": "1 new episode",
+        "reco_title": "Recommended for you",
+        "reco_text": "Not seen yet, but it matches what you like to watch.",
+        "reco_badge": "For you",
+        "rewatch_title": "Watch it again?",
+        "rewatch_text": "Movies you already know but haven't seen in a while.",
+        "rewatch_badge": "Seen before",
+        "rewatch_last": "Last seen {date}",
+        "subject_suggestions": "Picks for you on {server}",
         "season": "Season {n}",
         "watch_now": "Watch now",
         "open_server": "Open {server}",
@@ -52,6 +70,8 @@ STRINGS = {
                   "If you no longer want these e-mails, just tell the server admin.",
         "test_subject": "Last Call: test e-mail",
         "test_body": "If you can read this, SMTP delivery works.",
+        "months_long": ["January", "February", "March", "April", "May", "June", "July", "August",
+                        "September", "October", "November", "December"],
         "months": ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
         "weekdays": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
     },
@@ -69,3 +89,7 @@ def format_date(d: date, lang: str) -> str:
     if lang == "de":
         return f"{wd} {d.day}. {mon}"
     return f"{wd}, {mon} {d.day}"
+
+
+def format_month(d: date, lang: str) -> str:
+    return f"{t(lang)['months'][d.month - 1]} {d.year}"

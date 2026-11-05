@@ -58,27 +58,55 @@
 </article>
 
 <article id="schedule">
-  <header><strong>Schedule &amp; content</strong></header>
+  <header><strong>Schedule</strong></header>
   <label><input type="checkbox" role="switch" name="schedule_enabled" {% if s.schedule_enabled == '1' %}checked{% endif %}> Send automatically</label>
   <div class="grid">
-    <label>Day
+    <label>How often
+      <select name="schedule_frequency">
+        {% for v, l in [('daily', 'Every day'), ('weekly', 'Every week'), ('biweekly', 'Every 2 weeks'), ('monthly', 'Every month')] %}
+        <option value="{{ v }}" {% if s.schedule_frequency == v or (v == 'daily' and s.schedule_weekday == 'daily') %}selected{% endif %}>{{ l }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>On
       <select name="schedule_weekday">
-        <option value="daily" {% if s.schedule_weekday == 'daily' %}selected{% endif %}>Every day</option>
         {% for d, l in [('mon','Monday'),('tue','Tuesday'),('wed','Wednesday'),('thu','Thursday'),('fri','Friday'),('sat','Saturday'),('sun','Sunday')] %}
         <option value="{{ d }}" {% if s.schedule_weekday == d %}selected{% endif %}>{{ l }}</option>{% endfor %}
       </select>
     </label>
     <label>Time <input type="time" name="schedule_time" value="{{ s.schedule_time }}"></label>
+  </div>
+  <small class="muted">"Every 2 weeks" runs on that weekday in even calendar weeks, "Every month" on the first such weekday of the month. The day is ignored for "Every day".</small>
+</article>
+
+<article id="content">
+  <header><strong>Mail content</strong></header>
+  <div class="grid">
     <label>Mail language
       <select name="language">
         <option value="de" {% if s.language == 'de' %}selected{% endif %}>Deutsch</option>
         <option value="en" {% if s.language == 'en' %}selected{% endif %}>English</option>
       </select>
     </label>
+    <label>"Recently added" look-back for a user's first mail (days)
+      <input name="new_lookback_days" value="{{ s.new_lookback_days }}" inputmode="numeric">
+    </label>
   </div>
-  <label>"Recently added" look-back for a user's first mail (days)
-    <input name="new_lookback_days" value="{{ s.new_lookback_days }}" inputmode="numeric">
-  </label>
+  <p class="muted"><small>"Leaving soon" and "Recently added" are always included when they have content. The sections below are optional.</small></p>
+  <fieldset>
+    <label><input type="checkbox" role="switch" name="reco_enabled" {% if s.reco_enabled == '1' %}checked{% endif %}> <strong>Recommended for you</strong>: unwatched movies and shows that match the genres the user watches most</label>
+    <label>Number of recommendations <input name="reco_count" value="{{ s.reco_count }}" inputmode="numeric"></label>
+  </fieldset>
+  <fieldset>
+    <label><input type="checkbox" role="switch" name="rewatch_enabled" {% if s.rewatch_enabled == '1' %}checked{% endif %}> <strong>Watch it again?</strong>: movies the user has seen, but not recently</label>
+    <div class="grid">
+      <label>Number of movies <input name="rewatch_count" value="{{ s.rewatch_count }}" inputmode="numeric"></label>
+      <label>Only if last watched more than … days ago <input name="rewatch_min_days" value="{{ s.rewatch_min_days }}" inputmode="numeric"></label>
+    </div>
+  </fieldset>
+  <div class="grid">
+    <label>Don't suggest the same title again for … days <input name="suggestion_cooldown_days" value="{{ s.suggestion_cooldown_days }}" inputmode="numeric"></label>
+    <label class="check-row"><input type="checkbox" role="switch" name="send_suggestions_only" {% if s.send_suggestions_only == '1' %}checked{% endif %}> Send a mail even when there are only suggestions (nothing leaving, nothing new)</label>
+  </div>
 </article>
 
 <button type="submit">Save settings</button>
