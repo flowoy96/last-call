@@ -31,49 +31,98 @@ def iso(dt: datetime) -> str:
     return dt.strftime("%Y-%m-%dT%H:%M:%S.0000000Z")
 
 
-# (name, type, year, library, days since added to Jellyfin)
+# (name, type, year, library, days since added, genres, community rating)
 CATALOG = [
-    ("The Lighthouse Keeper's Daughter", "Movie", 2019, "movies", 400),
-    ("Neon Harbor", "Movie", 2021, "movies", 380),
-    ("Glass Orchard", "Movie", 2017, "movies", 500),
-    ("Paper Comets", "Movie", 2020, "movies", 450),
-    ("Midnight at Copper Lake", "Movie", 2018, "movies", 610),
-    ("The Quiet Cartographer", "Movie", 2022, "movies", 300),
-    ("Saltwater Kingdom", "Series", 2016, "shows", 700),
-    ("Orbit of Small Things", "Series", 2019, "shows", 520),
-    ("Velvet Static", "Movie", 2024, "movies", 2),
-    ("Northbound Echo", "Movie", 2025, "movies", 3),
-    ("The Clockmaker's Garden", "Movie", 2023, "movies", 5),
-    ("Ember & Tide", "Series", 2025, "shows", 1),
-    ("Little Robot, Big Sky", "Movie", 2024, "kids", 4),
-    ("Dragons of Pebble Hill", "Movie", 2021, "kids", 200),
-    ("Harbor Lights", "Series", 2022, "shows", 400),
+    ("The Lighthouse Keeper's Daughter", "Movie", 2019, "movies", 400, ["Drama", "Mystery"], 7.4),
+    ("Neon Harbor", "Movie", 2021, "movies", 380, ["Thriller", "Crime"], 6.9),
+    ("Glass Orchard", "Movie", 2017, "movies", 500, ["Drama"], 7.8),
+    ("Paper Comets", "Movie", 2020, "movies", 450, ["Comedy", "Romance"], 6.5),
+    ("Midnight at Copper Lake", "Movie", 2018, "movies", 610, ["Thriller", "Mystery"], 7.1),
+    ("The Quiet Cartographer", "Movie", 2022, "movies", 300, ["Adventure", "Drama"], 7.6),
+    ("Saltwater Kingdom", "Series", 2016, "shows", 700, ["Drama", "Fantasy"], 8.1),
+    ("Orbit of Small Things", "Series", 2019, "shows", 520, ["Sci-Fi", "Comedy"], 7.3),
+    ("Velvet Static", "Movie", 2024, "movies", 2, ["Sci-Fi", "Thriller"], 7.0),
+    ("Northbound Echo", "Movie", 2025, "movies", 3, ["Adventure"], 6.8),
+    ("The Clockmaker's Garden", "Movie", 2023, "movies", 5, ["Fantasy", "Drama"], 7.2),
+    ("Ember & Tide", "Series", 2025, "shows", 1, ["Drama", "Mystery"], 7.9),
+    ("Little Robot, Big Sky", "Movie", 2024, "kids", 4, ["Animation", "Family"], 7.5),
+    ("Dragons of Pebble Hill", "Movie", 2021, "kids", 200, ["Animation", "Fantasy"], 6.9),
+    ("Harbor Lights", "Series", 2022, "shows", 400, ["Crime", "Drama"], 8.0),
+    ("Silent Meridian", "Movie", 2016, "movies", 900, ["Thriller", "Mystery"], 7.7),
+    ("The Fox and the Lantern", "Movie", 2015, "movies", 1000, ["Fantasy", "Adventure"], 7.0),
+    ("Concrete Lullaby", "Movie", 2019, "movies", 640, ["Crime", "Drama"], 7.3),
+    ("Static Bloom", "Movie", 2020, "movies", 560, ["Sci-Fi", "Drama"], 6.6),
+    ("A Map of Rain", "Movie", 2014, "movies", 1100, ["Romance", "Drama"], 6.9),
+    ("Kettle Island", "Series", 2018, "shows", 820, ["Mystery", "Crime"], 7.8),
+    ("Tin Crown", "Series", 2021, "shows", 430, ["Fantasy", "Adventure"], 7.1),
+    ("Low Tide Detectives", "Series", 2020, "shows", 600, ["Crime", "Comedy"], 7.4),
 ]
 
 ITEMS = {}
-for name, kind, year, lib, age in CATALOG:
-    iid = _id(name)
+
+
+def add_item(name, kind, year, lib, age, genres, rating, suffix=""):
+    iid = _id(name + suffix)
     ITEMS[iid] = {
         "Id": iid, "Name": name, "Type": kind, "ProductionYear": year,
         "DateCreated": iso(NOW - timedelta(days=age, hours=3)), "_lib": lib,
+        "Genres": genres, "CommunityRating": rating,
+        "ProviderIds": {"Tmdb": str(int(_id(name)[:6], 16))},
         "ImageTags": {"Primary": "x"},
     }
+    return iid
 
-# Three new episodes for an existing series
+
+for row in CATALOG:
+    add_item(*row)
+
+# Duplicates in a separate 4K library (different item ids, same TMDb id):
+#  - Neon Harbor: 1080p copy is scheduled for deletion, 4K copy stays -> not "leaving"
+#  - Velvet Static: both copies are new -> listed once
+#  - The Quiet Cartographer: old title, 4K copy added yesterday -> not "new"
+add_item("Neon Harbor", "Movie", 2021, "movies4k", 90, ["Thriller", "Crime"], 6.9, suffix="#4k")
+add_item("Velvet Static", "Movie", 2024, "movies4k", 2, ["Sci-Fi", "Thriller"], 7.0, suffix="#4k")
+add_item("The Quiet Cartographer", "Movie", 2022, "movies4k", 1, ["Adventure", "Drama"], 7.6, suffix="#4k")
+
+# Three new episodes for an existing series; episode 5 exists in two qualities.
 _harbor = _id("Harbor Lights")
-for n in range(4, 7):
-    eid = _id(f"Harbor Lights S02E{n:02d}")
+for n, version in ((4, ""), (5, ""), (5, " 2160p"), (6, "")):
+    eid = _id(f"Harbor Lights S02E{n:02d}{version}")
     ITEMS[eid] = {
         "Id": eid, "Name": f"Episode {n}", "Type": "Episode", "SeriesId": _harbor,
         "SeriesName": "Harbor Lights", "ParentIndexNumber": 2, "IndexNumber": n,
-        "DateCreated": iso(NOW - timedelta(days=n - 2)), "_lib": "shows", "ImageTags": {},
+        "DateCreated": iso(NOW - timedelta(days=max(n - 3, 0), hours=1)), "_lib": "shows", "ImageTags": {},
     }
 
 USERS = [
-    {"Id": _id("user-anna"), "Name": "Anna", "Policy": {"IsDisabled": False}, "_libs": {"movies", "shows", "kids"}},
+    {"Id": _id("user-anna"), "Name": "Anna", "Policy": {"IsDisabled": False},
+     "_libs": {"movies", "movies4k", "shows", "kids"}},
     {"Id": _id("user-ben"), "Name": "Ben", "Policy": {"IsDisabled": False}, "_libs": {"movies", "shows"}},
     {"Id": _id("user-kids"), "Name": "Kids", "Policy": {"IsDisabled": False}, "_libs": {"kids"}},
 ]
+
+
+def _played(days_ago, fav=False, count=1):
+    return {"Played": True, "PlayCount": count, "IsFavorite": fav,
+            "LastPlayedDate": iso(NOW - timedelta(days=days_ago))}
+
+
+# Watch history per user: title -> UserData
+USER_DATA = {
+    "Anna": {
+        "Silent Meridian": _played(420, fav=True, count=2),
+        "Midnight at Copper Lake": _played(300),
+        "Concrete Lullaby": _played(510),
+        "The Quiet Cartographer": _played(20),          # too recent for "watch again"
+        "The Fox and the Lantern": _played(700),
+        "Kettle Island": {"Played": False, "PlayedPercentage": 40.0, "UnplayedItemCount": 6},
+    },
+    "Ben": {
+        "Paper Comets": _played(400),
+        "A Map of Rain": _played(800, fav=True),
+        "Tin Crown": {"Played": True, "PlayCount": 1},
+    },
+}
 
 # Maintainerr: two collections with titles scheduled for removal
 LEAVING = [
@@ -143,8 +192,13 @@ def poster_png(item_id: str, width: int = 400) -> bytes:
     return buf.getvalue()
 
 
-def public(item: dict) -> dict:
-    return {k: v for k, v in item.items() if not k.startswith("_")}
+def public(item: dict, user: dict | None = None) -> dict:
+    out = {k: v for k, v in item.items() if not k.startswith("_")}
+    if user is not None:
+        ud = {"Played": False, "PlayCount": 0, "IsFavorite": False, "PlaybackPositionTicks": 0, "Key": item["Id"]}
+        ud.update(USER_DATA.get(user["Name"], {}).get(item["Name"] if item["Type"] != "Episode" else "", {}))
+        out["UserData"] = ud
+    return out
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -182,7 +236,7 @@ class Handler(BaseHTTPRequestHandler):
             if q.get("sortby") == "DateCreated":
                 items.sort(key=lambda i: i["DateCreated"], reverse=q.get("sortorder") == "Descending")
             start, limit = int(q.get("startindex", 0)), int(q.get("limit", 1000))
-            return self.send_json({"Items": [public(i) for i in items[start:start + limit]], "TotalRecordCount": len(items)})
+            return self.send_json({"Items": [public(i, user) for i in items[start:start + limit]], "TotalRecordCount": len(items)})
         if p.startswith("/Items/") and p.endswith("/Images/Primary"):
             iid = p.split("/")[2]
             if iid not in ITEMS:
