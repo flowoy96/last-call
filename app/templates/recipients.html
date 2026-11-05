@@ -1,36 +1,63 @@
 {% extends "base.html" %}
 {% block title %}Recipients · Last Call{% endblock %}
+{% block main_class %}container wide{% endblock %}
 {% block content %}
 <div class="row">
   <h2>Recipients</h2>
-  <form method="post" action="/recipients/import" class="inline">
-    <input type="hidden" name="csrf" value="{{ csrf }}">
-    <button type="submit" class="secondary">Import users from Jellyfin</button>
-  </form>
+  <div class="buttons">
+    {% for srv in servers %}
+    <form method="post" action="/recipients/import/{{ srv }}" class="inline">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button type="submit" class="secondary">Import users from {{ srv|capitalize }}</button>
+    </form>
+    {% endfor %}
+  </div>
 </div>
-<p class="muted">Each user only gets titles from libraries they can access in Jellyfin. Only send e-mails to people who agreed to receive them.</p>
-{% if recipients %}
+<p class="muted">
+  One row per person. Accounts with the same name (or, for Plex, e-mail) are linked automatically when you import;
+  you can change the links below. Each person only gets titles they can access on the selected server(s).
+  Only send e-mails to people who agreed to receive them.
+</p>
+{% if not servers %}
+<article><p>No media server is enabled yet. Set up Jellyfin and/or Plex in the <a href="/settings">settings</a> first.</p></article>
+{% elif people %}
 <form method="post">
   <input type="hidden" name="csrf" value="{{ csrf }}">
   <div class="overflow-auto">
-  <table class="striped">
-    <thead><tr><th>Jellyfin user</th><th>E-mail</th><th>Active</th><th>Last mail</th><th></th></tr></thead>
+  <table class="striped recipients">
+    <thead><tr><th>Name</th><th>E-mail</th><th>Jellyfin account</th><th>Plex account</th><th>Send</th><th>Active</th><th>Last mail</th><th></th></tr></thead>
     <tbody>
-    {% for r in recipients %}
+    {% for p in people %}
     <tr>
-      <td>{{ r.name }}</td>
-      <td><input type="email" name="email_{{ r.jellyfin_id }}" value="{{ r.email }}" placeholder="name@example.com" aria-label="E-mail for {{ r.name }}"></td>
-      <td><input type="checkbox" role="switch" name="enabled_{{ r.jellyfin_id }}" {% if r.enabled %}checked{% endif %} aria-label="Active"></td>
-      <td class="nowrap">{{ r.last_sent|localtime }}</td>
-      <td><a href="/preview?user={{ r.jellyfin_id }}">Preview</a></td>
+      <td>{{ p.name }}</td>
+      <td><input type="email" name="email_{{ p.id }}" value="{{ p.email }}" placeholder="name@example.com" aria-label="E-mail for {{ p.name }}"></td>
+      {% for srv in ['jellyfin', 'plex'] %}
+      <td>
+        <select name="{{ srv }}_{{ p.id }}" aria-label="{{ srv|capitalize }} account for {{ p.name }}">
+          <option value="">–</option>
+          {% for a in accounts[srv] %}<option value="{{ a.id }}" {% if p[srv ~ '_id'] == a.id %}selected{% endif %}>{{ a.name }}</option>{% endfor %}
+        </select>
+      </td>
+      {% endfor %}
+      <td>
+        <select name="servers_{{ p.id }}" aria-label="Which server(s) to cover for {{ p.name }}">
+          <option value="both" {% if p.servers not in ('jellyfin', 'plex') %}selected{% endif %}>Both (1 mail)</option>
+          <option value="jellyfin" {% if p.servers == 'jellyfin' %}selected{% endif %}>Jellyfin</option>
+          <option value="plex" {% if p.servers == 'plex' %}selected{% endif %}>Plex</option>
+        </select>
+      </td>
+      <td><input type="checkbox" role="switch" name="enabled_{{ p.id }}" {% if p.enabled %}checked{% endif %} aria-label="Active"></td>
+      <td class="nowrap">{{ p.last_sent|localtime }}</td>
+      <td><a href="/preview?user={{ p.id }}">Preview</a></td>
     </tr>
     {% endfor %}
     </tbody>
   </table>
   </div>
+  <p class="muted"><small>"Both (1 mail)" combines all linked accounts in one mail; with only one linked account it simply covers that server. Choose "Jellyfin" or "Plex" to limit the mail to one server.</small></p>
   <button type="submit">Save recipients</button>
 </form>
 {% else %}
-<article><p>No users yet. Configure Jellyfin in the settings, then import your users.</p></article>
+<article><p>No recipients yet. Import your users with the button above.</p></article>
 {% endif %}
 {% endblock %}

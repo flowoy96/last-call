@@ -13,8 +13,12 @@
 <form method="post" id="settings">
 <input type="hidden" name="csrf" value="{{ csrf }}">
 
+<p class="muted">Use Jellyfin, Plex or both. People who use both servers can get one combined mail (see Recipients).</p>
+
 <article id="jellyfin">
-  <header><strong>Jellyfin</strong></header>
+  <header class="row"><strong>Jellyfin</strong>
+    <label class="inline-switch"><input type="checkbox" role="switch" name="jellyfin_enabled" {% if s.jellyfin_enabled == '1' %}checked{% endif %}> Enabled</label>
+  </header>
   <div class="grid">
     <label>Internal URL <small>(used by Last Call)</small><input name="jellyfin_url" value="{{ s.jellyfin_url }}" placeholder="http://jellyfin:8096"></label>
     {{ secret('jellyfin_api_key', 'API key', s.jellyfin_api_key) }}
@@ -23,16 +27,40 @@
     <label>Public URL <small>(used for links in the mail)</small><input name="jellyfin_public_url" value="{{ s.jellyfin_public_url }}" placeholder="https://jellyfin.example.com"></label>
     <label>Server name <small>(shown in the mail)</small><input name="server_name" value="{{ s.server_name }}"></label>
   </div>
-  <button type="submit" formaction="/settings/test/jellyfin" class="secondary outline small">Test connection (saved values)</button>
-</article>
-
-<article id="maintainerr">
-  <header><strong>Maintainerr</strong></header>
+  <h6>Maintainerr for Jellyfin <small class="muted">(optional, for "Leaving soon")</small></h6>
   <div class="grid">
     <label>URL <input name="maintainerr_url" value="{{ s.maintainerr_url }}" placeholder="http://maintainerr:6246"></label>
     {{ secret('maintainerr_api_key', 'API key (optional, e.g. for a reverse proxy)', s.maintainerr_api_key) }}
   </div>
-  <button type="submit" formaction="/settings/test/maintainerr" class="secondary outline small">Test connection (saved values)</button>
+  <div class="buttons">
+    <button type="submit" formaction="/settings/test/jellyfin" class="secondary outline small">Test Jellyfin</button>
+    <button type="submit" formaction="/settings/test/maintainerr" class="secondary outline small">Test Maintainerr</button>
+    <small class="muted">Tests use the saved values.</small>
+  </div>
+</article>
+
+<article id="plex">
+  <header class="row"><strong>Plex</strong>
+    <label class="inline-switch"><input type="checkbox" role="switch" name="plex_enabled" {% if s.plex_enabled == '1' %}checked{% endif %}> Enabled</label>
+  </header>
+  <div class="grid">
+    <label>Server URL <small>(used by Last Call)</small><input name="plex_url" value="{{ s.plex_url }}" placeholder="http://plex:32400"></label>
+    {{ secret('plex_token', 'Plex token (server owner)', s.plex_token) }}
+  </div>
+  <div class="grid">
+    <label>Public URL <small>(optional; empty = links open app.plex.tv)</small><input name="plex_public_url" value="{{ s.plex_public_url }}" placeholder="https://plex.example.com"></label>
+    <label>Server name <small>(optional; empty = name from Plex)</small><input name="plex_server_name" value="{{ s.plex_server_name }}"></label>
+  </div>
+  <h6>Maintainerr for Plex <small class="muted">(optional; can be the same instance as above)</small></h6>
+  <div class="grid">
+    <label>URL <input name="plex_maintainerr_url" value="{{ s.plex_maintainerr_url }}" placeholder="http://maintainerr:6246"></label>
+    {{ secret('plex_maintainerr_api_key', 'API key (optional)', s.plex_maintainerr_api_key) }}
+  </div>
+  <div class="buttons">
+    <button type="submit" formaction="/settings/test/plex" class="secondary outline small">Test Plex</button>
+    <button type="submit" formaction="/settings/test/plex-maintainerr" class="secondary outline small">Test Maintainerr</button>
+    <small class="muted">Tests use the saved values.</small>
+  </div>
 </article>
 
 <article id="smtp">

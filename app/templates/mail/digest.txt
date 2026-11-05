@@ -4,12 +4,11 @@
 
 == {{ title }} ==
 {% for c in cards %}
-* {{ c.title }}{% if c.subtitle %} ({{ c.subtitle }}){% endif %}{% if c.badge %} [{{ c.badge }}]{% endif %}
+* {{ c.title }}{% if c.subtitle %} ({{ c.subtitle }}){% endif %}{% if multi %} [{{ labels[c.src] }}]{% endif %}{% if c.badge %} [{{ c.badge }}]{% endif %}
   {{ link(c) }}
 {% endfor %}{% endfor %}
-{% if server_url %}
-{{ s.open_server.format(server=server) }}: {{ server_url }}
-{% endif %}
+{% for label, url in server_links %}
+{{ label }}: {{ url }}{% endfor %}
 --
 {{ s.footer.format(server=server) }}
 {% endautoescape %}

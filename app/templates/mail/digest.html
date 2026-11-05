@@ -78,7 +78,7 @@
           </tr></table>
           {% endif %}
           <p style="margin:8px 0 0 0;font-size:14px;line-height:18px;font-weight:700;color:#ffffff;">{{ c.title }}</p>
-          {% if c.subtitle %}<p style="margin:2px 0 0 0;font-size:12px;line-height:16px;color:#8b8b95;">{{ c.subtitle }}</p>{% endif %}
+          {% if c.subtitle or multi %}<p style="margin:2px 0 0 0;font-size:12px;line-height:16px;color:#8b8b95;">{{ c.subtitle }}{% if multi %}{% if c.subtitle %} · {% endif %}<span style="color:#c9c9d1;">{{ labels[c.src] }}</span>{% endif %}</p>{% endif %}
           <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-top:10px;"><tr>
             <td style="border-radius:4px;background-color:#ffffff;">
               <a href="{{ link(c) }}" target="_blank" style="display:inline-block;padding:6px 12px;font-size:12px;line-height:16px;font-weight:700;color:#0b0b0f;text-decoration:none;border-radius:4px;">&#9654;&nbsp;{{ s.watch_now }}</a>
@@ -94,16 +94,18 @@
   </td></tr>
   {% endfor %}
 
-  {% if server_url %}
+  {% if server_links %}
   <tr><td align="center" style="padding:32px 32px 8px 32px;">
+    {% for label, url in server_links %}
     <!--[if mso]>
-    <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" href="{{ server_url }}" style="height:44px;v-text-anchor:middle;width:240px;" arcsize="12%" stroke="f" fillcolor="#e11d48">
-    <w:anchorlock/><center style="color:#ffffff;font-family:Arial,sans-serif;font-size:15px;font-weight:bold;">{{ s.open_server.format(server=server) }}</center>
+    <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" href="{{ url }}" style="height:44px;v-text-anchor:middle;width:240px;" arcsize="12%" stroke="f" fillcolor="#e11d48">
+    <w:anchorlock/><center style="color:#ffffff;font-family:Arial,sans-serif;font-size:15px;font-weight:bold;">{{ label }}</center>
     </v:roundrect>
     <![endif]-->
     <!--[if !mso]><!-->
-    <a href="{{ server_url }}" target="_blank" style="display:inline-block;background-color:#e11d48;color:#ffffff;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:15px;font-weight:700;line-height:44px;padding:0 28px;border-radius:6px;text-decoration:none;">{{ s.open_server.format(server=server) }}</a>
+    <a href="{{ url }}" target="_blank" style="display:inline-block;margin:4px 6px;background-color:#e11d48;color:#ffffff;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:15px;font-weight:700;line-height:44px;padding:0 28px;border-radius:6px;text-decoration:none;">{{ label }}</a>
     <!--<![endif]-->
+    {% endfor %}
   </td></tr>
   {% endif %}
 

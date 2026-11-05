@@ -7,7 +7,7 @@
   <form method="get" class="inline grow">
     <fieldset role="group">
       <select name="user" aria-label="User">
-        {% for u in users %}<option value="{{ u.jellyfin_id }}" {% if u.jellyfin_id == selected %}selected{% endif %}>{{ u.name }}{% if u.email %} ({{ u.email }}){% endif %}</option>{% endfor %}
+        {% for u in users %}<option value="{{ u.id }}" {% if u.id|string == selected %}selected{% endif %}>{{ u.name }}{% if u.email %} ({{ u.email }}){% endif %}</option>{% endfor %}
       </select>
       <button type="submit" class="secondary">Show</button>
     </fieldset>

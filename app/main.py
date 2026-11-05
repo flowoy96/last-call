@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -21,7 +22,7 @@ from starlette.staticfiles import StaticFiles
 from starlette.templating import Jinja2Templates
 
 from . import __version__, db, digest, mailer, scheduler, security
-from .clients import ApiError, Jellyfin, Maintainerr
+from .clients import ApiError, Maintainerr
 from .i18n import t
 
 logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -42,7 +43,8 @@ def _localtime(value: str | None) -> str:
 templates.env.filters["localtime"] = _localtime
 
 SETTING_FIELDS = [k for k in db.DEFAULTS]
-URL_FIELDS = {"jellyfin_url", "jellyfin_public_url", "maintainerr_url"}
+URL_FIELDS = {"jellyfin_url", "jellyfin_public_url", "maintainerr_url", "plex_url", "plex_public_url",
+              "plex_maintainerr_url"}
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
@@ -159,12 +161,12 @@ async def logout(request: Request):
 @login_required
 async def dashboard(request: Request):
     s = db.get_settings()
-    recipients = db.list_recipients()
+    people = db.list_people()
     status = {
-        "jellyfin": bool(s["jellyfin_url"] and s["jellyfin_api_key"]),
-        "maintainerr": bool(s["maintainerr_url"]),
+        "jellyfin": s["jellyfin_enabled"] == "1" and bool(s["jellyfin_url"] and s["jellyfin_api_key"]),
+        "plex": s["plex_enabled"] == "1" and bool(s["plex_url"] and s["plex_token"]),
         "smtp": bool(s["smtp_host"] and s["smtp_from_email"]),
-        "recipients": sum(1 for r in recipients if r["enabled"] and r["email"]),
+        "recipients": sum(1 for p in people if p["enabled"] and p["email"]),
     }
     return page(request, "dashboard.html", status=status, next_run=scheduler.next_run(),
                 log_rows=db.recent_log(), settings=s)
@@ -254,75 +256,113 @@ async def test_mail(request: Request):
     return redirect("/settings#smtp")
 
 
+# --------------------------------------------------------------------------
+# connection tests
+# --------------------------------------------------------------------------
+
+SERVICES = {
+    # service: (media server, maintainerr url key, maintainerr api key)
+    "jellyfin": ("jellyfin", None, None),
+    "plex": ("plex", None, None),
+    "maintainerr": ("jellyfin", "maintainerr_url", "maintainerr_api_key"),
+    "plex-maintainerr": ("plex", "plex_maintainerr_url", "plex_maintainerr_api_key"),
+}
+
+
 def _test_service(service: str) -> str:
     s = db.get_settings()
-    if service == "jellyfin":
-        with Jellyfin(s["jellyfin_url"], s["jellyfin_api_key"]) as jf:
-            info = jf.system_info()
-            users = jf.users()
-        return f"Jellyfin OK: {info.get('ServerName', '?')} {info.get('Version', '')}, {len(users)} users."
-    with Maintainerr(s["maintainerr_url"], s["maintainerr_api_key"]) as m:
-        pending = m.pending_deletions(digest.local_tz())
-    return f"Maintainerr OK: {len(pending)} items scheduled for removal."
+    server, url_key, api_key = SERVICES[service]
+    if url_key:
+        with Maintainerr(s[url_key], s[api_key]) as m:
+            pending = m.pending_deletions(digest.local_tz(), server)
+        return f"Maintainerr OK: {len(pending)} {server.capitalize()} items scheduled for removal."
+    src = digest.open_source(server, s)
+    try:
+        info = src.system_info()
+        users = src.accounts()
+    finally:
+        src.close()
+    return f"{src.product} OK: {info.get('ServerName', '?')} {info.get('Version', '')}, {len(users)} users."
 
 
 @login_required
 async def test_service(request: Request):
     service = request.path_params["service"]
-    if service not in ("jellyfin", "maintainerr"):
+    if service not in SERVICES:
         return PlainTextResponse("not found", status_code=404)
     try:
         flash(request, "ok", await run_in_threadpool(_test_service, service))
     except Exception as e:  # noqa: BLE001
         flash(request, "error", str(e))
-    return redirect(f"/settings#{service}")
+    return redirect(f"/settings#{SERVICES[service][0]}")
 
 
 # --------------------------------------------------------------------------
-# recipients
+# recipients (people)
 # --------------------------------------------------------------------------
+
+def _cached_accounts(server: str) -> list[dict]:
+    try:
+        return json.loads(db.get_setting(f"accounts_{server}", "[]"))
+    except ValueError:
+        return []
+
 
 @login_required
 async def recipients(request: Request):
+    people = db.list_people()
     if request.method == "POST":
         form = await request.form()
         errors = 0
-        for r in db.list_recipients():
-            rid = r["jellyfin_id"]
-            email = (form.get(f"email_{rid}") or "").strip()
+        valid = {srv: {str(a["id"]) for a in _cached_accounts(srv)} for srv in digest.SERVER_KEYS}
+        for p in people:
+            pid = p["id"]
+            email = (form.get(f"email_{pid}") or "").strip()
             if email and not EMAIL_RE.match(email):
-                flash(request, "error", f"Invalid e-mail address for {r['name']}.")
+                flash(request, "error", f"Invalid e-mail address for {p['name']}.")
                 errors += 1
                 continue
-            db.update_recipient(rid, email, bool(form.get(f"enabled_{rid}")) and bool(email))
+            links = {}
+            for srv in digest.SERVER_KEYS:
+                val = (form.get(f"{srv}_{pid}") or "").strip()
+                links[srv] = val if val in valid[srv] else None
+            if not links["jellyfin"] and not links["plex"]:
+                flash(request, "error", f"{p['name']} needs at least one linked account.")
+                errors += 1
+                continue
+            db.update_person(pid, email, bool(form.get(f"enabled_{pid}")) and bool(email),
+                             form.get(f"servers_{pid}") or "both", links["jellyfin"], links["plex"])
         if not errors:
             flash(request, "ok", "Recipients saved.")
         return redirect("/recipients")
-    return page(request, "recipients.html", recipients=db.list_recipients())
-
-
-def _import_users() -> tuple[int, int]:
     s = db.get_settings()
-    with Jellyfin(s["jellyfin_url"], s["jellyfin_api_key"]) as jf:
-        users = jf.users()
-    existing = {r["jellyfin_id"] for r in db.list_recipients()}
-    jf_ids = set()
-    for u in users:
-        jf_ids.add(u["Id"])
-        db.upsert_recipient_name(u["Id"], u["Name"])
-    removed = 0
-    for rid in existing - jf_ids:
-        db.delete_recipient(rid)
-        removed += 1
-    return len(jf_ids - existing), removed
+    return page(request, "recipients.html", people=people,
+                servers=digest.configured_servers(s),
+                accounts={srv: _cached_accounts(srv) for srv in digest.SERVER_KEYS})
+
+
+def _import_users(server: str) -> tuple[int, int, int]:
+    s = db.get_settings()
+    src = digest.open_source(server, s)
+    try:
+        accounts = src.accounts()
+    finally:
+        src.close()
+    db.set_settings({f"accounts_{server}": json.dumps(
+        [{"id": str(a["id"]), "name": a["name"]} for a in accounts])})
+    return db.sync_accounts(server, accounts)
 
 
 @login_required
 async def import_users(request: Request):
+    server = request.path_params["server"]
+    if server not in digest.SERVER_KEYS:
+        return PlainTextResponse("not found", status_code=404)
     try:
-        added, removed = await run_in_threadpool(_import_users)
-        flash(request, "ok", f"Imported from Jellyfin: {added} new, {removed} removed.")
-    except ApiError as e:
+        added, linked, removed = await run_in_threadpool(_import_users, server)
+        flash(request, "ok", f"Imported from {server.capitalize()}: {added} new, {linked} linked to existing "
+                             f"recipients by name/e-mail, {removed} removed.")
+    except Exception as e:  # noqa: BLE001
         flash(request, "error", str(e))
     return redirect("/recipients")
 
@@ -331,38 +371,38 @@ async def import_users(request: Request):
 # preview
 # --------------------------------------------------------------------------
 
-def _preview_html(user_id: str) -> tuple[str, str]:
-    r = db.get_recipient(user_id)
-    if r is None:
+def _preview_html(person_id: str) -> tuple[str, str]:
+    p = db.get_person(person_id)
+    if p is None:
         raise ApiError("Unknown recipient")
     ctx = digest.open_context(db.get_settings())
     try:
-        d = digest.build_digest(ctx, r["jellyfin_id"], r["name"], digest._since(r, ctx.settings))
+        d = digest.digest_for(ctx, p)
         if d.empty:
             return "", "(empty: this mail would not be sent)"
-        html, _ = digest.render(d, ctx, lambda c: f"/poster/{c.poster_id}")
+        html, _ = digest.render(d, ctx, lambda c: f"/poster/{c.src}/{c.poster_id}")
         if not d.should_send(ctx.settings):
             note = ("<div style='font-family:sans-serif;background:#3f3f46;color:#fff;padding:12px 16px'>"
                     "Preview only: nothing is leaving and nothing is new, so this mail would <b>not</b> be sent. "
-                    "Enable \"Send when there are only suggestions\" in the settings to change that.</div>")
+                    "Enable \"Send a mail even when there are only suggestions\" in the settings to change that.</div>")
             html = re.sub(r"(<body[^>]*>)", lambda m: m.group(1) + note, html, count=1)
-        return html, digest.subject(d, ctx.settings)
+        return html, digest.subject(d, ctx)
     finally:
-        ctx.jf.close()
+        ctx.close()
 
 
 @login_required
 async def preview(request: Request):
-    users = db.list_recipients()
-    selected = request.query_params.get("user") or (users[0]["jellyfin_id"] if users else "")
-    return page(request, "preview.html", users=users, selected=selected)
+    people = db.list_people()
+    selected = request.query_params.get("user") or (str(people[0]["id"]) if people else "")
+    return page(request, "preview.html", users=people, selected=selected)
 
 
 @login_required
 async def preview_frame(request: Request):
-    user_id = request.query_params.get("user", "")
+    person_id = request.query_params.get("user", "")
     try:
-        html, subj = await run_in_threadpool(_preview_html, user_id)
+        html, subj = await run_in_threadpool(_preview_html, person_id)
     except Exception as e:  # noqa: BLE001
         return HTMLResponse(f"<p style='font-family:sans-serif;color:#c00;padding:2rem'>Preview failed: {escape(str(e))}</p>")
     if not html:
@@ -374,32 +414,37 @@ async def preview_frame(request: Request):
 @login_required
 async def preview_send(request: Request):
     form = await request.form()
-    user_id = form.get("user") or ""
-    r = db.get_recipient(user_id)
-    if not r or not r["email"]:
-        flash(request, "error", "This user has no e-mail address.")
-        return redirect(f"/preview?user={user_id}")
-    if not r["enabled"]:
+    person_id = form.get("user") or ""
+    p = db.get_person(person_id) if person_id.isdigit() else None
+    if not p or not p["email"]:
+        flash(request, "error", "This recipient has no e-mail address.")
+        return redirect(f"/preview?user={person_id}")
+    if not p["enabled"]:
         flash(request, "error", "This recipient is disabled. Enable them on the Recipients page first.")
-        return redirect(f"/preview?user={user_id}")
-    counts = await run_in_threadpool(digest.run, user_id)
+        return redirect(f"/preview?user={person_id}")
+    counts = await run_in_threadpool(digest.run, int(person_id))
     summary = ", ".join(f"{k}: {v}" for k, v in counts.items() if v) or "nothing to do"
-    flash(request, "ok" if counts.get("sent") else "error", f"{r['name']}: {summary} (see log on the dashboard)")
-    return redirect(f"/preview?user={user_id}")
+    flash(request, "ok" if counts.get("sent") else "error", f"{p['name']}: {summary} (see log on the dashboard)")
+    return redirect(f"/preview?user={person_id}")
 
 
 @login_required
 async def poster(request: Request):
-    item_id = request.path_params["item_id"]
+    server, item_id = request.path_params["server"], request.path_params["item_id"]
     s = db.get_settings()
+    if server not in digest.configured_servers(s):
+        return Response(status_code=404)
 
     def load():
-        with Jellyfin(s["jellyfin_url"], s["jellyfin_api_key"]) as jf:
-            return digest.poster(jf, item_id)
+        src = digest.open_source(server, s)
+        try:
+            return digest.poster(src, item_id)
+        finally:
+            src.close()
 
     try:
         data = await run_in_threadpool(load)
-    except ApiError:
+    except Exception:  # noqa: BLE001
         data = None
     if not data:
         return Response(status_code=404)
@@ -462,11 +507,11 @@ def create_app() -> Starlette:
         Route("/settings/test-mail", test_mail, methods=["POST"]),
         Route("/settings/test/{service}", test_service, methods=["POST"]),
         Route("/recipients", recipients, methods=["GET", "POST"]),
-        Route("/recipients/import", import_users, methods=["POST"]),
+        Route("/recipients/import/{server}", import_users, methods=["POST"]),
         Route("/preview", preview),
         Route("/preview/frame", preview_frame),
         Route("/preview/send", preview_send, methods=["POST"]),
-        Route("/poster/{item_id}", poster),
+        Route("/poster/{server}/{item_id}", poster),
         Route("/health", health),
         Mount("/static", StaticFiles(directory=BASE / "static"), name="static"),
     ]

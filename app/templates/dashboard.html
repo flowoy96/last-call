@@ -3,7 +3,7 @@
 <h2>Dashboard</h2>
 <div class="grid stats">
   <article><small>Jellyfin</small><strong class="{{ 'ok' if status.jellyfin else 'bad' }}">{{ 'Configured' if status.jellyfin else 'Not set up' }}</strong></article>
-  <article><small>Maintainerr</small><strong class="{{ 'ok' if status.maintainerr else 'bad' }}">{{ 'Configured' if status.maintainerr else 'Not set up' }}</strong></article>
+  <article><small>Plex</small><strong class="{{ 'ok' if status.plex else 'bad' }}">{{ 'Configured' if status.plex else 'Not set up' }}</strong></article>
   <article><small>SMTP</small><strong class="{{ 'ok' if status.smtp else 'bad' }}">{{ 'Configured' if status.smtp else 'Not set up' }}</strong></article>
   <article><small>Active recipients</small><strong>{{ status.recipients }}</strong></article>
 </div>
