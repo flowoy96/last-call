@@ -1,0 +1,31 @@
+# Last Call: paste this file as a Portainer stack (Stacks > Add stack > Web editor).
+services:
+  last-call:
+    image: ghcr.io/flowoy96/last-call:latest
+    container_name: last-call
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - TZ=Europe/Berlin
+      # Set to 1 when Last Call is only reached via HTTPS (reverse proxy):
+      - LASTCALL_SECURE_COOKIES=0
+    volumes:
+      - last-call-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    # Optional: join the network your Jellyfin/Maintainerr containers are in,
+    # then use http://jellyfin:8096 and http://maintainerr:6246 in the settings.
+    # networks:
+    #   - media
+
+volumes:
+  last-call-data:
+
+# networks:
+#   media:
+#     external: true
