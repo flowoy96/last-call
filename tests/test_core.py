@@ -45,7 +45,7 @@ def test_maintainerr_pending_deletions():
     cols = [
         {"id": 1, "isActive": True, "deleteAfterDays": 30, "arrAction": 0, "mediaServerType": "jellyfin",
          "media": [{"mediaServerId": "AAA", "addDate": added}, {"mediaServerId": "bbb", "addDate": added}]},
-        {"id": 2, "isActive": True, "deleteAfterDays": 10, "arrAction": 1,
+        {"id": 2, "isActive": True, "deleteAfterDays": 10, "arrAction": 1, "mediaServerType": "jellyfin",
          "media": [{"mediaServerId": "bbb", "addDate": added}]},
         {"id": 3, "isActive": True, "deleteAfterDays": 5, "arrAction": 4,  # do nothing
          "media": [{"mediaServerId": "ccc", "addDate": added}]},
@@ -68,6 +68,14 @@ def test_render_and_message():
     from app.clients import PendingDeletion
 
     class FakeJF:
+        key, product, label = "jellyfin", "Jellyfin", "Home"
+
+        def link(self, item_id):
+            return f"https://jf.example.com/web/#/details?id={item_id}&serverId=srv"
+
+        def home_url(self):
+            return "https://jf.example.com/web/"
+
         def library(self, user):
             return []
 
@@ -84,8 +92,9 @@ def test_render_and_message():
                 "smtp_from_email": "a@example.com", "smtp_from_name": "LC"}
     tz = ZoneInfo("Europe/Berlin")
     soon = datetime.now(tz).date() + timedelta(days=3)
-    ctx = digest.Context(settings, FakeJF(), "srv", {"aaa": PendingDeletion("aaa", soon, "c")}, tz)
-    d = digest.build_digest(ctx, "u", "Anna", datetime.now(timezone.utc) - timedelta(days=7))
+    jf = FakeJF()
+    ctx = digest.Context(settings, {"jellyfin": jf}, {"jellyfin": {"aaa": PendingDeletion("aaa", soon, "c")}}, tz)
+    d = digest.build_digest(ctx, [(jf, "u")], "1", "Anna", datetime.now(timezone.utc) - timedelta(days=7))
     assert [c.title for c in d.leaving] == ["Paper <Comets>"]
     assert d.new[0].subtitle == "1 new episode"
     html, text = digest.render(d, ctx, lambda c: f"cid:{digest.cid_for(c)}")
@@ -93,7 +102,7 @@ def test_render_and_message():
     assert "https://jf.example.com/web/#/details?id=aaa&amp;serverId=srv" in html
     assert "Leaving soon" in html and "Recently added" in html
     assert "Paper <Comets>" in text
-    msg = mailer.build_message(settings, "anna@example.com", digest.subject(d, settings), html, text,
+    msg = mailer.build_message(settings, "anna@example.com", digest.subject(d, ctx), html, text,
                                {"poster-aaa@lastcall": b"\xff\xd8jpeg"})
     types = [p.get_content_type() for p in msg.walk()]
     assert types == ["multipart/alternative", "text/plain", "multipart/related", "text/html", "image/jpeg"]
@@ -122,26 +131,40 @@ def movie(iid, name, tmdb, created_days, genres=("Drama",), rating=7.0, **ud):
 
 
 class LibJF:
-    """Fake Jellyfin backed by a static library."""
+    """Fake media server backed by a static library."""
 
-    def __init__(self, items, episodes=()):
+    def __init__(self, items, episodes=(), key="jellyfin"):
+        self.key, self.product, self.label = key, key.capitalize(), f"{key} home"
         self.items, self.episodes = items, list(episodes)
 
+    def _tag(self, items):
+        return [{**i, "_src": self.key} for i in items]
+
+    def link(self, item_id):
+        return f"https://{self.key}.example.com/{item_id}"
+
+    def home_url(self):
+        return f"https://{self.key}.example.com/"
+
+    def close(self):
+        pass
+
     def library(self, user):
-        return [dict(i) for i in self.items if i["Type"] in ("Movie", "Series")]
+        return self._tag(i for i in self.items if i["Type"] in ("Movie", "Series"))
 
     def items_by_ids(self, user, ids):
         wanted = set(ids)
-        return [dict(i) for i in self.items if i["Id"] in wanted]
+        return self._tag(i for i in self.items if i["Id"] in wanted)
 
     def recently_added(self, user, types, since, limit=300):
         pool = self.episodes if types == "Episode" else [i for i in self.items if i["Type"] in types.split(",")]
         from app.clients import parse_dt
-        out = [dict(i) for i in pool if parse_dt(i["DateCreated"]) >= since]
+        out = self._tag(i for i in pool if parse_dt(i["DateCreated"]) >= since)
         return sorted(out, key=lambda i: i["DateCreated"], reverse=True)
 
 
-def make_ctx(jf, deletions=(), **settings):
+def make_ctx(jf, deletions=(), extra=None, **settings):
+    """Context with `jf` (and optional `extra` = (source, deletions)) as media servers."""
     from app import digest
     from app.clients import PendingDeletion
     tz = ZoneInfo("Europe/Berlin")
@@ -149,13 +172,19 @@ def make_ctx(jf, deletions=(), **settings):
             "rewatch_count": "4", "rewatch_min_days": "180", "suggestion_cooldown_days": "90"}
     base.update(settings)
     soon = datetime.now(tz).date() + timedelta(days=5)
-    dels = {d: PendingDeletion(d, soon, "c") for d in deletions}
-    return digest.Context(base, jf, "srv", dels, tz)
+    sources = {jf.key: jf}
+    dels = {jf.key: {d: PendingDeletion(d, soon, "c") for d in deletions}}
+    if extra:
+        src, extra_dels = extra
+        sources[src.key] = src
+        dels[src.key] = {d: PendingDeletion(d, soon, "c") for d in extra_dels}
+    return digest.Context(base, sources, dels, tz)
 
 
 def build(ctx, since_days=7):
     from app import digest
-    return digest.build_digest(ctx, "u1", "Anna", NOW - timedelta(days=since_days))
+    accounts = [(src, "u1") for src in ctx.sources.values()]
+    return digest.build_digest(ctx, accounts, "1", "Anna", NOW - timedelta(days=since_days))
 
 
 def all_titles(d):
@@ -227,7 +256,7 @@ def test_recommendations_match_taste_and_skip_watched():
 def test_suggestion_cooldown():
     from app import db
     items = [movie(f"m{i}", f"Movie {i}", str(100 + i), 500) for i in range(3)]
-    db.record_suggestions("u1", {"Movie:tmdb:100", "Movie:tmdb:101"})
+    db.record_suggestions("1", {"Movie:tmdb:100", "Movie:tmdb:101"})
     d = build(make_ctx(LibJF(items), reco_count="3", rewatch_enabled="0"))
     assert [c.title for c in d.reco] == ["Movie 2"]
 
@@ -275,8 +304,143 @@ def test_announced_new_titles_not_recommended_next_time(monkeypatch):
     monkeypatch.setattr(digest, "poster", lambda jf, pid: None)
     jf = LibJF([movie("n1", "Brand New", "50", 1), movie("o1", "Older", "51", 300)])
     ctx = make_ctx(jf, rewatch_enabled="0", reco_count="5")
-    db.upsert_recipient_name("u1", "Anna")
-    db.update_recipient("u1", "anna@example.com", True)
-    assert digest.send_to(ctx, db.get_recipient("u1")) == "sent"
-    later = digest.build_digest(ctx, "u1", "Anna", NOW)  # nothing is new any more
+    db.sync_accounts("jellyfin", [{"id": "u1", "name": "Anna"}])
+    person = db.list_people()[0]
+    db.update_person(person["id"], "anna@example.com", True, "both", "u1", None)
+    assert digest.send_to(ctx, db.get_person(person["id"])) == "sent"
+    later = digest.build_digest(ctx, [(jf, "u1")], str(person["id"]), "Anna", NOW)  # nothing is new any more
     assert "Brand New" not in [c.title for c in later.reco]
+
+
+# --------------------------------------------------------------------------
+# Plex and combined mails
+# --------------------------------------------------------------------------
+
+def test_plex_normalize():
+    from app.plex import normalize
+    m = {"ratingKey": "42", "type": "movie", "title": "Neon Harbor", "year": 2021, "addedAt": 1700000000,
+         "viewCount": 2, "lastViewedAt": 1690000000, "userRating": 8.0, "audienceRating": 7.1,
+         "Genre": [{"tag": "Thriller"}], "Guid": [{"id": "tmdb://123"}, {"id": "imdb://tt42"}], "thumb": "/t"}
+    it = normalize(m)
+    assert (it["Id"], it["Type"], it["_src"]) == ("42", "Movie", "plex")
+    assert it["ProviderIds"] == {"Tmdb": "123", "Imdb": "tt42"}
+    assert it["UserData"]["Played"] and it["UserData"]["PlayCount"] == 2 and it["UserData"]["IsFavorite"]
+    show = normalize({"ratingKey": 7, "type": "show", "title": "S", "leafCount": 10, "viewedLeafCount": 4})
+    assert show["Type"] == "Series" and show["UserData"]["PlayedPercentage"] == 40 and not show["UserData"]["Played"]
+    ep = normalize({"ratingKey": 9, "type": "episode", "title": "E", "grandparentTitle": "S",
+                    "grandparentRatingKey": 7, "parentIndex": 2, "index": 5})
+    assert (ep["SeriesId"], ep["SeriesName"], ep["ParentIndexNumber"], ep["IndexNumber"]) == ("7", "S", 2, 5)
+
+
+def test_plex_link_and_token_redaction():
+    from app.plex import Plex, _redact
+    p = Plex("http://plex:32400", "secret")
+    p.machine_id = "abc"
+    assert p.link("42") == "https://app.plex.tv/desktop/#!/server/abc/details?key=%2Flibrary%2Fmetadata%2F42"
+    p.public_url = "https://plex.example.com"
+    assert p.link("42").startswith("https://plex.example.com/web/index.html#!/server/abc/")
+    assert "secret" not in _redact("GET http://plex/x?X-Plex-Token=secret&a=1")
+    p.close()
+
+
+def test_maintainerr_split_by_server():
+    from app.clients import Maintainerr
+    added = "2026-10-01T10:00:00.000Z"
+    cols = [
+        {"id": 1, "isActive": True, "deleteAfterDays": 30, "arrAction": 0, "mediaServerType": "jellyfin",
+         "media": [{"mediaServerId": "jf1", "addDate": added}]},
+        {"id": 2, "isActive": True, "deleteAfterDays": 30, "arrAction": 0, "mediaServerType": "plex",
+         "media": [{"mediaServerId": "101", "addDate": added}]},
+        {"id": 3, "isActive": True, "deleteAfterDays": 30, "arrAction": 0,  # old Maintainerr = Plex
+         "media": [{"plexId": 102, "addDate": added}]},
+    ]
+    m = Maintainerr("http://maintainerr")
+    m.client = httpx.Client(base_url="http://maintainerr",
+                            transport=httpx.MockTransport(lambda r: httpx.Response(200, json=cols)))
+    tz = ZoneInfo("Europe/Berlin")
+    assert set(m.pending_deletions(tz, "jellyfin")) == {"jf1"}
+    assert set(m.pending_deletions(tz, "plex")) == {"101", "102"}
+
+
+def test_combined_mail_deduplicates_across_servers():
+    jf = LibJF([movie("j1", "Neon Harbor", "1", 400), movie("j2", "Velvet Static", "2", 1),
+                movie("j3", "Only On Jellyfin", "3", 400)])
+    px = LibJF([movie("p1", "Neon Harbor", "1", 400), movie("p2", "Velvet Static", "2", 1),
+                movie("p3", "Glass Orchard", "4", 400)], key="plex")
+    # Neon Harbor leaves Plex but stays on Jellyfin; Glass Orchard leaves Plex for good
+    ctx = make_ctx(jf, extra=(px, ["p1", "p3"]), reco_enabled="0", rewatch_enabled="0")
+    d = build(ctx)
+    assert [c.title for c in d.leaving] == ["Glass Orchard"] and d.leaving[0].src == "plex"
+    assert [c.title for c in d.new] == ["Velvet Static"]
+    from app import digest
+    html, text = digest.render(d, ctx, lambda c: None)
+    assert "Plex" in html and "[Plex]" in text  # server label on each card in combined mails
+    assert "Open jellyfin home" in html and "Open plex home" in html
+
+
+def test_watched_on_other_server_is_not_recommended():
+    jf = LibJF([movie("j1", "Seen On Jellyfin", "1", 400, Played=True, PlayCount=1, LastPlayedDate=_iso(20))])
+    px = LibJF([movie("p1", "Seen On Jellyfin", "1", 400), movie("p2", "Fresh", "2", 400)], key="plex")
+    d = build(make_ctx(jf, extra=(px, []), rewatch_enabled="0"))
+    assert [c.title for c in d.reco] == ["Fresh"]
+
+
+def test_accounts_for_choices():
+    from app import digest
+    jf, px = LibJF([]), LibJF([], key="plex")
+    ctx = make_ctx(jf, extra=(px, []))
+    person = {"servers": "both", "jellyfin_id": "j", "plex_id": "p"}
+    assert [s.key for s, _ in digest.accounts_for(person, ctx)[0]] == ["jellyfin", "plex"]
+    assert [s.key for s, _ in digest.accounts_for({**person, "servers": "plex"}, ctx)[0]] == ["plex"]
+    pairs, problems = digest.accounts_for({**person, "servers": "jellyfin", "jellyfin_id": None}, ctx)
+    assert not pairs and problems
+    del ctx.sources["plex"]
+    ctx.errors["plex"] = "down"
+    pairs, problems = digest.accounts_for(person, ctx)
+    assert [s.key for s, _ in pairs] == ["jellyfin"] and problems == ["down"]
+
+
+def test_sync_accounts_links_people_using_both_servers():
+    from app import db
+    db.sync_accounts("jellyfin", [{"id": "j-anna", "name": "Anna"}, {"id": "j-ben", "name": "Ben"}])
+    added, linked, removed = db.sync_accounts("plex", [
+        {"id": "owner", "name": "anna", "email": "Anna@Example.com"},
+        {"id": "77", "name": "carla", "email": "carla@example.com"},
+    ])
+    assert (added, linked, removed) == (1, 1, 0)
+    people = {p["name"]: p for p in db.list_people()}
+    assert people["Anna"]["plex_id"] == "owner" and people["Anna"]["email"] == "anna@example.com"
+    assert people["carla"]["jellyfin_id"] is None and not people["carla"]["enabled"]
+    # re-import is idempotent: no duplicates
+    assert db.sync_accounts("plex", [{"id": "owner", "name": "anna"}, {"id": "77", "name": "carla"}]) == (0, 0, 0)
+    assert len(db.list_people()) == 3
+    # an account that disappears is unlinked; a person without accounts is removed
+    db.sync_accounts("plex", [{"id": "owner", "name": "anna"}])
+    assert {p["name"] for p in db.list_people()} == {"Anna", "Ben"}
+
+
+def test_migration_from_v1(tmp_path, monkeypatch):
+    import sqlite3
+    from app import db
+    path = tmp_path / "old.db"
+    con = sqlite3.connect(path)
+    con.executescript("""
+        CREATE TABLE recipients (jellyfin_id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL DEFAULT '',
+                                 enabled INTEGER NOT NULL DEFAULT 0, last_sent TEXT);
+        CREATE TABLE suggestions (user_id TEXT NOT NULL, item_key TEXT NOT NULL, ts TEXT NOT NULL,
+                                  PRIMARY KEY (user_id, item_key));
+        INSERT INTO recipients VALUES ('jf-1', 'Anna', 'anna@example.com', 1, '2026-11-01T10:00:00+00:00');
+        INSERT INTO suggestions VALUES ('jf-1', 'Movie:tmdb:1', '2026-11-01T10:00:00+00:00');
+    """)
+    con.commit()
+    con.close()
+    monkeypatch.setattr(db, "DB_PATH", path)
+    db.init()
+    db.init()  # idempotent
+    people = db.list_people()
+    assert len(people) == 1
+    p = people[0]
+    assert (p["name"], p["email"], p["enabled"], p["jellyfin_id"], p["servers"]) == \
+        ("Anna", "anna@example.com", 1, "jf-1", "both")
+    with db.connect() as c:
+        assert c.execute("SELECT user_id FROM suggestions").fetchone()[0] == str(p["id"])

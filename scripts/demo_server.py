@@ -1,10 +1,12 @@
-"""Fake Jellyfin + Maintainerr API with made-up titles and generated posters.
+"""Fake Jellyfin, Plex, plex.tv and Maintainerr APIs with made-up titles and generated posters.
 
 Development/screenshot helper only, not part of the container image.
 
-    python scripts/demo_server.py            # listens on 127.0.0.1:8899
+    python scripts/demo_server.py        # Jellyfin + Maintainerr on :8899, Plex + plex.tv on :8898
 
-Point Last Call at http://127.0.0.1:8899 for both Jellyfin and Maintainerr.
+Point Last Call at http://127.0.0.1:8899 for Jellyfin and Maintainerr (for both servers),
+and at http://127.0.0.1:8898 with token "demo-plex-token" for Plex. Start Last Call with
+LASTCALL_PLEX_TV_URL=http://127.0.0.1:8898 so plex.tv requests go to the fake as well.
 """
 
 from __future__ import annotations
@@ -148,9 +150,9 @@ def maintainerr_collections() -> list[dict]:
     ]
 
 
-def poster_png(item_id: str, width: int = 400) -> bytes:
-    item = ITEMS.get(item_id, {"Name": "?", "ProductionYear": ""})
-    rnd = random.Random(item_id)
+def poster_png(item_id: str, width: int = 400, item: dict | None = None) -> bytes:
+    item = item or ITEMS.get(item_id, {"Name": "?", "ProductionYear": ""})
+    rnd = random.Random(item.get("Name", item_id))
     h = rnd.random()
     w, ht = width, int(width * 1.5)
     top = tuple(int(c * 255) for c in colorsys.hsv_to_rgb(h, 0.65, 0.55))
@@ -218,7 +220,7 @@ class Handler(BaseHTTPRequestHandler):
         q = {k.lower(): v[0] for k, v in parse_qs(u.query).items()}
         p = u.path
         if p == "/api/collections/overlay-data":
-            return self.send_json(maintainerr_collections())
+            return self.send_json(maintainerr_collections() + plex_maintainerr_collections())
         if p == "/System/Info":
             return self.send_json({"Id": "demo-server-id", "ServerName": "Demo Jellyfin", "Version": "10.11.0"})
         if p == "/Users":
@@ -251,8 +253,130 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json({"error": "not found"}, 404)
 
 
+# --------------------------------------------------------------------------
+# Plex
+# --------------------------------------------------------------------------
+
+PLEX_MACHINE = "demo-plex-machine"
+PLEX_TOKENS = {"demo-plex-token": "anna", "tok-carla": "carla"}
+PLEX_LIBS = {"anna": {"1", "2"}, "carla": {"1"}}
+
+# (title, type, year, section, days since added) - TMDb ids match the Jellyfin catalog by title
+PLEX_CATALOG = [
+    ("Neon Harbor", "movie", 2021, "1", 380),            # leaving on Plex, stays on Jellyfin
+    ("Glass Orchard", "movie", 2017, "1", 500),          # leaving on both servers -> listed once
+    ("Velvet Static", "movie", 2024, "1", 2),            # new on both -> listed once
+    ("Copper Skies", "movie", 2025, "1", 1),             # new, Plex only
+    ("Midnight at Copper Lake", "movie", 2018, "1", 610),
+    ("Silent Meridian", "movie", 2016, "1", 900),
+    ("Paper Lanterns at Dawn", "movie", 2019, "1", 640),  # Plex only
+    ("Wild Signal", "show", 2023, "2", 300),             # Plex only
+    ("Saltwater Kingdom", "show", 2016, "2", 700),
+]
+GENRES = {row[0]: row[5] for row in CATALOG}
+GENRES.update({"Copper Skies": ["Sci-Fi", "Adventure"], "Paper Lanterns at Dawn": ["Romance", "Drama"],
+               "Wild Signal": ["Thriller", "Sci-Fi"]})
+PLEX_ITEMS = {}
+for n, (title, kind, year, sec, age) in enumerate(PLEX_CATALOG, start=101):
+    PLEX_ITEMS[str(n)] = {
+        "ratingKey": str(n), "key": f"/library/metadata/{n}", "type": kind, "title": title, "year": year,
+        "addedAt": int((NOW - timedelta(days=age)).timestamp()), "librarySectionID": sec,
+        "Genre": [{"tag": g} for g in GENRES.get(title, ["Drama"])], "audienceRating": 7.0,
+        "Guid": [{"id": f"tmdb://{int(_id(title)[:6], 16)}"}], "thumb": f"/library/metadata/{n}/thumb/1",
+        **({"leafCount": 10, "viewedLeafCount": 0} if kind == "show" else {}),
+    }
+PLEX_VIEWS = {  # per Plex user: title -> (viewCount, days since last view, userRating)
+    "anna": {"Midnight at Copper Lake": (1, 300, 0), "Paper Lanterns at Dawn": (2, 500, 9)},
+    "carla": {"Silent Meridian": (1, 400, 0)},
+}
+
+
+def plex_maintainerr_collections() -> list[dict]:
+    by_title = {m["title"]: k for k, m in PLEX_ITEMS.items()}
+    media = [{"collectionId": 10, "mediaServerId": by_title[t], "addDate": iso(NOW - timedelta(days=d))}
+             for t, d in (("Neon Harbor", 25), ("Glass Orchard", 24), ("Midnight at Copper Lake", 23))]
+    return [{"id": 10, "title": "Plex: old movies", "isActive": True, "deleteAfterDays": 30, "arrAction": 0,
+             "mediaServerType": "plex", "type": "movie", "media": media}]
+
+
+def plex_view(item: dict, user: str) -> dict:
+    out = dict(item)
+    views, days, rating = PLEX_VIEWS.get(user, {}).get(item["title"], (0, 0, 0))
+    if views:
+        out.update(viewCount=views, lastViewedAt=int((NOW - timedelta(days=days)).timestamp()))
+    if rating:
+        out["userRating"] = rating
+    return out
+
+
+class PlexHandler(Handler):
+    def do_GET(self):  # noqa: N802
+        u = urlparse(self.path)
+        q = {k: v[0] for k, v in parse_qs(u.query).items()}
+        p = u.path
+        # plex.tv
+        if p == "/api/v2/user":
+            return self.send_json({"username": "anna", "email": "anna@example.com", "title": "Anna"})
+        if p == f"/api/servers/{PLEX_MACHINE}/shared_servers":
+            body = ('<?xml version="1.0" encoding="UTF-8"?><MediaContainer>'
+                    '<SharedServer id="1" username="carla" email="carla@example.com" userID="77" '
+                    'accessToken="tok-carla"><Section key="1" title="Movies" type="movie" shared="1"/></SharedServer>'
+                    '</MediaContainer>').encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/xml")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        user = PLEX_TOKENS.get(q.get("X-Plex-Token", ""))
+        if not user:
+            return self.send_json({"error": "unauthorized"}, 401)
+        libs = PLEX_LIBS[user]
+        if p == "/":
+            return self.send_json({"MediaContainer": {"friendlyName": "Living Room Plex", "version": "1.41.0",
+                                                      "machineIdentifier": PLEX_MACHINE}})
+        if p == "/library/sections":
+            dirs = [{"key": "1", "type": "movie", "title": "Movies"}, {"key": "2", "type": "show", "title": "TV"}]
+            return self.send_json({"MediaContainer": {"Directory": [d for d in dirs if d["key"] in libs]}})
+        if p.startswith("/library/sections/") and p.endswith("/all"):
+            sec = p.split("/")[3]
+            if sec not in libs:
+                return self.send_json({}, 404)
+            want = {"1": "movie", "2": "show", "4": "episode"}.get(q.get("type", ""), "")
+            items = [plex_view(m, user) for m in PLEX_ITEMS.values() if m["librarySectionID"] == sec and m["type"] == want]
+            if "addedAt>>" in q:
+                items = [m for m in items if m["addedAt"] >= int(q["addedAt>>"])]
+            start, size = int(q.get("X-Plex-Container-Start", 0)), int(q.get("X-Plex-Container-Size", 1000))
+            return self.send_json({"MediaContainer": {"Metadata": items[start:start + size]}})
+        if p.startswith("/library/metadata/"):
+            keys = p.split("/")[3].split(",")
+            items = [plex_view(PLEX_ITEMS[k], user) for k in keys
+                     if k in PLEX_ITEMS and PLEX_ITEMS[k]["librarySectionID"] in libs]
+            if not items:
+                return self.send_json({}, 404)
+            return self.send_json({"MediaContainer": {"Metadata": items}})
+        if p == "/photo/:/transcode":
+            key = q.get("url", "").split("/")[3] if q.get("url", "").count("/") >= 3 else ""
+            m = PLEX_ITEMS.get(key)
+            if not m:
+                return self.send_json({}, 404)
+            body = poster_png(key, min(int(q.get("width", 400)), 600),
+                              {"Name": m["title"], "ProductionYear": m["year"]})
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        self.send_json({"error": "not found"}, 404)
+
+
 if __name__ == "__main__":
     import sys
+    import threading
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8899
-    print(f"demo API on http://127.0.0.1:{port}")
+    plex_port = int(sys.argv[2]) if len(sys.argv) > 2 else 8898
+    plex = ThreadingHTTPServer(("127.0.0.1", plex_port), PlexHandler)
+    threading.Thread(target=plex.serve_forever, daemon=True).start()
+    print(f"demo Jellyfin/Maintainerr API on http://127.0.0.1:{port}, Plex + plex.tv on http://127.0.0.1:{plex_port}")
     ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
