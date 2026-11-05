@@ -11,7 +11,8 @@ import httpx
 TIMEOUT = httpx.Timeout(20.0, connect=10.0)
 USER_AGENT = "LastCall/1.0"
 
-ITEM_FIELDS = "ProductionYear,DateCreated,SeriesId,SeriesName,ParentIndexNumber,IndexNumber"
+ITEM_FIELDS = "ProductionYear,DateCreated,ProviderIds,Genres"
+LIBRARY_FIELDS = "ProductionYear,DateCreated,ProviderIds,Genres"
 
 
 class ApiError(RuntimeError):
@@ -73,6 +74,29 @@ class Jellyfin:
             data = self._get("/Items", userId=user_id, ids=",".join(chunk), fields=ITEM_FIELDS)
             out.extend(data.get("Items", []))
         return out
+
+    def library(self, user_id: str) -> list[dict]:
+        """All movies and series the user can access, with their watch state (UserData)."""
+        out: list[dict] = []
+        start, page = 0, 1000
+        while True:
+            data = self._get(
+                "/Items",
+                userId=user_id,
+                includeItemTypes="Movie,Series",
+                recursive="true",
+                fields=LIBRARY_FIELDS,
+                enableUserData="true",
+                enableImages="false",
+                excludeLocationTypes="Virtual",
+                startIndex=start,
+                limit=page,
+            )
+            items = data.get("Items", [])
+            out.extend(items)
+            if len(items) < page:
+                return out
+            start += page
 
     def recently_added(self, user_id: str, types: str, since: datetime, limit: int = 300) -> list[dict]:
         """Items of `types` created after `since`, newest first (paged, cut off client-side)."""

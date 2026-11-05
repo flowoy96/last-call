@@ -6,7 +6,7 @@ import os
 import sqlite3
 import threading
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 DATA_DIR = Path(os.environ.get("LASTCALL_DATA", "/data"))
@@ -25,6 +25,12 @@ CREATE TABLE IF NOT EXISTS recipients (
     email       TEXT NOT NULL DEFAULT '',
     enabled     INTEGER NOT NULL DEFAULT 0,
     last_sent   TEXT
+);
+CREATE TABLE IF NOT EXISTS suggestions (
+    user_id  TEXT NOT NULL,
+    item_key TEXT NOT NULL,
+    ts       TEXT NOT NULL,
+    PRIMARY KEY (user_id, item_key)
 );
 CREATE TABLE IF NOT EXISTS send_log (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -49,12 +55,24 @@ DEFAULTS = {
     "smtp_from_name": "Last Call",
     "smtp_from_email": "",
     "schedule_enabled": "0",
+    "schedule_frequency": "weekly",  # daily | weekly | biweekly | monthly
     "schedule_weekday": "fri",
     "schedule_time": "18:00",
     "language": "de",
     "server_name": "Jellyfin",
     "new_lookback_days": "7",
+    "reco_enabled": "1",
+    "reco_count": "6",
+    "rewatch_enabled": "1",
+    "rewatch_count": "3",
+    "rewatch_min_days": "180",
+    "suggestion_cooldown_days": "90",
+    "send_suggestions_only": "0",
 }
+
+CHECKBOX_KEYS = {"schedule_enabled", "reco_enabled", "rewatch_enabled", "send_suggestions_only"}
+NUMERIC_KEYS = {"smtp_port", "new_lookback_days", "reco_count", "rewatch_count",
+                "rewatch_min_days", "suggestion_cooldown_days"}
 
 SECRET_KEYS = {"jellyfin_api_key", "maintainerr_api_key", "smtp_password"}
 
@@ -140,11 +158,35 @@ def update_recipient(jellyfin_id: str, email: str, enabled: bool) -> None:
 def delete_recipient(jellyfin_id: str) -> None:
     with connect() as c:
         c.execute("DELETE FROM recipients WHERE jellyfin_id = ?", (jellyfin_id,))
+        c.execute("DELETE FROM suggestions WHERE user_id = ?", (jellyfin_id,))
 
 
 def mark_sent(jellyfin_id: str, ts: str) -> None:
     with connect() as c:
         c.execute("UPDATE recipients SET last_sent = ? WHERE jellyfin_id = ?", (ts, jellyfin_id))
+
+
+# --- suggestion history (avoid repeating recommendations) ---------------
+
+def recent_suggestions(user_id: str, days: int) -> set[str]:
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat(timespec="seconds")
+    with connect() as c:
+        rows = c.execute(
+            "SELECT item_key FROM suggestions WHERE user_id = ? AND ts >= ?", (user_id, cutoff)
+        ).fetchall()
+    return {r["item_key"] for r in rows}
+
+
+def record_suggestions(user_id: str, keys: set[str]) -> None:
+    ts = now_iso()
+    with connect() as c:
+        c.executemany(
+            "INSERT INTO suggestions(user_id, item_key, ts) VALUES(?, ?, ?) "
+            "ON CONFLICT(user_id, item_key) DO UPDATE SET ts = excluded.ts",
+            [(user_id, k, ts) for k in keys],
+        )
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=400)).isoformat(timespec="seconds")
+        c.execute("DELETE FROM suggestions WHERE ts < ?", (cutoff,))
 
 
 # --- log ------------------------------------------------------------------
