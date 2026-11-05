@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}Settings · Last Call{% endblock %}
+{% macro secret(name, label, saved) %}
+<div>
+<label>{{ label }}
+  <input type="password" name="{{ name }}" autocomplete="off" placeholder="{{ '•••••••• (saved)' if saved else '' }}">
+</label>
+{% if saved %}<label class="small-check"><input type="checkbox" name="clear_{{ name }}"> Remove saved value (leave the field empty to keep it)</label>{% endif %}
+</div>
+{% endmacro %}
+{% block content %}
+<h2>Settings</h2>
+<form method="post" id="settings">
+<input type="hidden" name="csrf" value="{{ csrf }}">
+
+<article id="jellyfin">
+  <header><strong>Jellyfin</strong></header>
+  <div class="grid">
+    <label>Internal URL <small>(used by Last Call)</small><input name="jellyfin_url" value="{{ s.jellyfin_url }}" placeholder="http://jellyfin:8096"></label>
+    {{ secret('jellyfin_api_key', 'API key', s.jellyfin_api_key) }}
+  </div>
+  <div class="grid">
+    <label>Public URL <small>(used for links in the mail)</small><input name="jellyfin_public_url" value="{{ s.jellyfin_public_url }}" placeholder="https://jellyfin.example.com"></label>
+    <label>Server name <small>(shown in the mail)</small><input name="server_name" value="{{ s.server_name }}"></label>
+  </div>
+  <button type="submit" formaction="/settings/test/jellyfin" class="secondary outline small">Test connection (saved values)</button>
+</article>
+
+<article id="maintainerr">
+  <header><strong>Maintainerr</strong></header>
+  <div class="grid">
+    <label>URL <input name="maintainerr_url" value="{{ s.maintainerr_url }}" placeholder="http://maintainerr:6246"></label>
+    {{ secret('maintainerr_api_key', 'API key (optional, e.g. for a reverse proxy)', s.maintainerr_api_key) }}
+  </div>
+  <button type="submit" formaction="/settings/test/maintainerr" class="secondary outline small">Test connection (saved values)</button>
+</article>
+
+<article id="smtp">
+  <header><strong>SMTP</strong></header>
+  <div class="grid">
+    <label>Host <input name="smtp_host" value="{{ s.smtp_host }}" placeholder="smtp.example.com"></label>
+    <label>Port <input name="smtp_port" value="{{ s.smtp_port }}" inputmode="numeric"></label>
+    <label>Encryption
+      <select name="smtp_security">
+        {% for v, l in [('starttls', 'STARTTLS (587)'), ('ssl', 'SSL/TLS (465)'), ('none', 'None')] %}
+        <option value="{{ v }}" {% if s.smtp_security == v %}selected{% endif %}>{{ l }}</option>{% endfor %}
+      </select>
+    </label>
+  </div>
+  <div class="grid">
+    <label>Username <input name="smtp_user" value="{{ s.smtp_user }}" autocomplete="off"></label>
+    {{ secret('smtp_password', 'Password', s.smtp_password) }}
+  </div>
+  <div class="grid">
+    <label>Sender name <input name="smtp_from_name" value="{{ s.smtp_from_name }}"></label>
+    <label>Sender address <input type="email" name="smtp_from_email" value="{{ s.smtp_from_email }}" placeholder="jellyfin@example.com"></label>
+  </div>
+</article>
+
+<article id="schedule">
+  <header><strong>Schedule &amp; content</strong></header>
+  <label><input type="checkbox" role="switch" name="schedule_enabled" {% if s.schedule_enabled == '1' %}checked{% endif %}> Send automatically</label>
+  <div class="grid">
+    <label>Day
+      <select name="schedule_weekday">
+        <option value="daily" {% if s.schedule_weekday == 'daily' %}selected{% endif %}>Every day</option>
+        {% for d, l in [('mon','Monday'),('tue','Tuesday'),('wed','Wednesday'),('thu','Thursday'),('fri','Friday'),('sat','Saturday'),('sun','Sunday')] %}
+        <option value="{{ d }}" {% if s.schedule_weekday == d %}selected{% endif %}>{{ l }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>Time <input type="time" name="schedule_time" value="{{ s.schedule_time }}"></label>
+    <label>Mail language
+      <select name="language">
+        <option value="de" {% if s.language == 'de' %}selected{% endif %}>Deutsch</option>
+        <option value="en" {% if s.language == 'en' %}selected{% endif %}>English</option>
+      </select>
+    </label>
+  </div>
+  <label>"Recently added" look-back for a user's first mail (days)
+    <input name="new_lookback_days" value="{{ s.new_lookback_days }}" inputmode="numeric">
+  </label>
+</article>
+
+<button type="submit">Save settings</button>
+</form>
+
+<article>
+  <header><strong>Send a test e-mail</strong></header>
+  <form method="post" action="/settings/test-mail">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <fieldset role="group">
+      <input type="email" name="to" placeholder="you@example.com" required aria-label="Recipient">
+      <button type="submit" class="secondary">Send test mail</button>
+    </fieldset>
+    <small>Uses the saved SMTP settings. Save first if you changed something.</small>
+  </form>
+</article>
+{% endblock %}

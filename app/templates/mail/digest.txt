@@ -1,0 +1,15 @@
+{% autoescape false %}{{ s.greeting.format(name=name) }}
+{{ s.intro.format(server=server) }}
+{% for key, title, text, cards in sections if cards %}
+
+== {{ title }} ==
+{% for c in cards %}
+* {{ c.title }}{% if c.subtitle %} ({{ c.subtitle }}){% endif %}{% if c.badge %} [{{ c.badge }}]{% endif %}
+  {{ link(c) }}
+{% endfor %}{% endfor %}
+{% if server_url %}
+{{ s.open_server.format(server=server) }}: {{ server_url }}
+{% endif %}
+--
+{{ s.footer.format(server=server) }}
+{% endautoescape %}

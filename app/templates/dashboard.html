@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Dashboard</h2>
+<div class="grid stats">
+  <article><small>Jellyfin</small><strong class="{{ 'ok' if status.jellyfin else 'bad' }}">{{ 'Configured' if status.jellyfin else 'Not set up' }}</strong></article>
+  <article><small>Maintainerr</small><strong class="{{ 'ok' if status.maintainerr else 'bad' }}">{{ 'Configured' if status.maintainerr else 'Not set up' }}</strong></article>
+  <article><small>SMTP</small><strong class="{{ 'ok' if status.smtp else 'bad' }}">{{ 'Configured' if status.smtp else 'Not set up' }}</strong></article>
+  <article><small>Active recipients</small><strong>{{ status.recipients }}</strong></article>
+</div>
+<article>
+  <div class="row">
+    <div>
+      <small>Next scheduled run</small><br>
+      <strong>{% if next_run %}{{ next_run.strftime('%a %d %b %Y, %H:%M') }}{% else %}Schedule disabled{% endif %}</strong>
+    </div>
+    <form method="post" action="/run" class="inline">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button type="submit">Send now to all recipients</button>
+    </form>
+  </div>
+</article>
+<h3>Send log</h3>
+{% if log_rows %}
+<div class="overflow-auto">
+<table class="striped">
+  <thead><tr><th>Time</th><th>Recipient</th><th>Status</th><th>Details</th></tr></thead>
+  <tbody>
+  {% for r in log_rows %}
+  <tr><td class="nowrap">{{ r.ts|localtime }}</td><td>{{ r.recipient }}</td><td><span class="pill {{ r.status }}">{{ r.status }}</span></td><td>{{ r.detail }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}<p class="muted">Nothing sent yet.</p>{% endif %}
+{% endblock %}

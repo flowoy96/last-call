@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Last Call{% endblock %}</title>
+<link rel="stylesheet" href="/static/pico.min.css">
+<link rel="stylesheet" href="/static/app.css">
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+</head>
+<body>
+<header class="container">
+  <nav>
+    <ul><li><a href="/" class="brand">LAST&nbsp;CALL</a></li></ul>
+    {% if logged_in %}
+    <ul>
+      <li><a href="/" {% if path == '/' %}aria-current="page"{% endif %}>Dashboard</a></li>
+      <li><a href="/recipients" {% if path.startswith('/recipients') %}aria-current="page"{% endif %}>Recipients</a></li>
+      <li><a href="/preview" {% if path.startswith('/preview') %}aria-current="page"{% endif %}>Preview</a></li>
+      <li><a href="/settings" {% if path.startswith('/settings') %}aria-current="page"{% endif %}>Settings</a></li>
+      <li><form method="post" action="/logout" class="inline"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="outline secondary small">Log out</button></form></li>
+    </ul>
+    {% endif %}
+  </nav>
+</header>
+<main class="container">
+  {% for kind, msg in flashes %}<p class="flash {{ kind }}" role="status">{{ msg }}</p>{% endfor %}
+  {% block content %}{% endblock %}
+</main>
+<footer class="container"><small>Last Call v{{ version }} · MIT · <a href="https://github.com/flowoy96/last-call">GitHub</a></small></footer>
+</body>
+</html>

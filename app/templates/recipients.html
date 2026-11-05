@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Recipients · Last Call{% endblock %}
+{% block content %}
+<div class="row">
+  <h2>Recipients</h2>
+  <form method="post" action="/recipients/import" class="inline">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button type="submit" class="secondary">Import users from Jellyfin</button>
+  </form>
+</div>
+<p class="muted">Each user only gets titles from libraries they can access in Jellyfin. Only send e-mails to people who agreed to receive them.</p>
+{% if recipients %}
+<form method="post">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <div class="overflow-auto">
+  <table class="striped">
+    <thead><tr><th>Jellyfin user</th><th>E-mail</th><th>Active</th><th>Last mail</th><th></th></tr></thead>
+    <tbody>
+    {% for r in recipients %}
+    <tr>
+      <td>{{ r.name }}</td>
+      <td><input type="email" name="email_{{ r.jellyfin_id }}" value="{{ r.email }}" placeholder="name@example.com" aria-label="E-mail for {{ r.name }}"></td>
+      <td><input type="checkbox" role="switch" name="enabled_{{ r.jellyfin_id }}" {% if r.enabled %}checked{% endif %} aria-label="Active"></td>
+      <td class="nowrap">{{ r.last_sent|localtime }}</td>
+      <td><a href="/preview?user={{ r.jellyfin_id }}">Preview</a></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <button type="submit">Save recipients</button>
+</form>
+{% else %}
+<article><p>No users yet. Configure Jellyfin in the settings, then import your users.</p></article>
+{% endif %}
+{% endblock %}

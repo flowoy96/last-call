@@ -1,0 +1,25 @@
+:root { --pico-primary: #e11d48; --pico-primary-background: #e11d48; --pico-primary-border: #e11d48;
+        --pico-primary-hover: #be123c; --pico-primary-hover-background: #be123c; --pico-primary-hover-border: #be123c;
+        --pico-primary-focus: rgba(225, 29, 72, .35); --pico-primary-inverse: #fff; }
+[data-theme=dark] { --pico-background-color: #0e0e12; --pico-card-background-color: #16161c; }
+.brand { font-weight: 900; letter-spacing: .18em; color: #e11d48 !important; }
+header.container nav { border-bottom: 1px solid #22222a; }
+form.inline { display: inline; margin: 0; }
+button.small { padding: .3rem .7rem; font-size: .85rem; margin: 0; width: auto; }
+.row { display: flex; gap: 1rem; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.row > .grow { flex: 1 1 18rem; }
+.row h2 { margin: 0; }
+.narrow { max-width: 28rem; margin: 2rem auto; }
+.muted { color: var(--pico-muted-color); }
+.nowrap { white-space: nowrap; }
+.flash { padding: .7rem 1rem; border-radius: .4rem; border-left: 4px solid; background: #1b1b22; }
+.flash.ok { border-color: #22c55e; }
+.flash.error { border-color: #e11d48; }
+.stats strong { display: block; font-size: 1.3rem; }
+.stats .ok { color: #4ade80; } .stats .bad { color: #fb7185; }
+.pill { padding: .1rem .5rem; border-radius: 1rem; font-size: .8rem; background: #2a2a33; }
+.pill.sent { background: #14532d; } .pill.error { background: #7f1d1d; } .pill.skipped { background: #3f3f46; }
+.small-check { font-size: .85rem; margin-top: -.6rem; }
+iframe.mail { width: 100%; height: 80vh; border: 1px solid #22222a; border-radius: .5rem; background: #0b0b0f; }
+table input[type=email] { margin: 0; min-width: 14rem; }
+footer { color: var(--pico-muted-color); }

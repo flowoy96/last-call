@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="{{ lang }}" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="x-apple-disable-message-reformatting">
+<meta name="color-scheme" content="dark">
+<meta name="supported-color-schemes" content="dark">
+<title>{{ subject }}</title>
+<!--[if mso]>
+<noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript>
+<style>table,td,div,h1,h2,p,a{font-family:Arial,Helvetica,sans-serif !important;}</style>
+<![endif]-->
+<style>
+  body{margin:0;padding:0;background:#0b0b0f;}
+  a{color:#ffffff;}
+  img{border:0;outline:none;text-decoration:none;-ms-interpolation-mode:bicubic;}
+  @media screen and (max-width:620px){
+    .wrap{width:100% !important;}
+    .px{padding-left:16px !important;padding-right:16px !important;}
+    .col{max-width:50% !important;}
+    .h1{font-size:24px !important;line-height:30px !important;}
+  }
+</style>
+</head>
+<body style="margin:0;padding:0;background-color:#0b0b0f;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;">
+<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:#0b0b0f;">{{ s.preheader }}&#8199;&#65279;&#847;&#8199;&#65279;&#847;&#8199;&#65279;&#847;&#8199;&#65279;&#847;</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#0b0b0f;">
+<tr><td align="center" style="padding:24px 8px;">
+<!--[if mso]><table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0"><tr><td><![endif]-->
+<table role="presentation" class="wrap" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px;max-width:600px;background-color:#141418;border-radius:12px;">
+
+  <!-- header -->
+  <tr><td class="px" style="padding:28px 32px 8px 32px;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+      <td style="font-size:22px;line-height:26px;font-weight:900;letter-spacing:3px;color:#e11d48;">LAST&nbsp;CALL</td>
+      <td align="right" style="font-size:13px;line-height:26px;color:#8b8b95;">{{ server }}</td>
+    </tr></table>
+  </td></tr>
+
+  <tr><td class="px" style="padding:16px 32px 8px 32px;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
+    <h1 class="h1" style="margin:0 0 8px 0;font-size:28px;line-height:34px;font-weight:700;color:#ffffff;">{{ s.greeting.format(name=name) }}</h1>
+    <p style="margin:0;font-size:16px;line-height:24px;color:#c9c9d1;">{{ s.intro.format(server=server) }}</p>
+  </td></tr>
+
+  {% for key, title, text, cards in sections if cards %}
+  <!-- section: {{ key }} -->
+  <tr><td class="px" style="padding:28px 32px 4px 32px;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
+      <td width="4" style="width:4px;background-color:{{ '#e11d48' if key == 'leaving' else '#22c55e' }};border-radius:2px;">&nbsp;</td>
+      <td style="padding-left:12px;">
+        <h2 style="margin:0;font-size:20px;line-height:26px;font-weight:700;color:#ffffff;">{{ title }}</h2>
+        <p style="margin:2px 0 0 0;font-size:14px;line-height:20px;color:#8b8b95;">{{ text }}</p>
+      </td>
+    </tr></table>
+  </td></tr>
+  <tr><td class="px" align="center" style="padding:12px 24px 0 24px;font-size:0;text-align:center;">
+    {% for row in cards|batch(3) %}
+    <!--[if mso]><table role="presentation" width="552" cellpadding="0" cellspacing="0" border="0"><tr><![endif]-->
+    {% for c in row %}
+    <!--[if mso]><td width="184" valign="top"><![endif]-->
+    <div class="col" style="display:inline-block;width:100%;max-width:184px;vertical-align:top;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+        <tr><td style="padding:8px;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;text-align:left;">
+          {% set src = img(c) %}
+          <a href="{{ link(c) }}" target="_blank" style="text-decoration:none;display:block;">
+          {% if src %}
+            <img src="{{ src }}" width="168" alt="{{ c.title }}" style="display:block;width:100%;max-width:168px;height:auto;border-radius:6px;background-color:#22222a;">
+          {% else %}
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+              <td height="240" align="center" valign="middle" style="height:240px;background-color:#22222a;border-radius:6px;color:#8b8b95;font-size:14px;padding:8px;">{{ c.title }}</td>
+            </tr></table>
+          {% endif %}
+          </a>
+          {% if c.badge %}
+          <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-top:8px;"><tr>
+            <td style="background-color:{{ '#e11d48' if key == 'leaving' else '#15803d' }};border-radius:4px;padding:3px 8px;font-size:11px;line-height:14px;font-weight:700;color:#ffffff;text-transform:uppercase;letter-spacing:0.5px;">{{ c.badge }}</td>
+          </tr></table>
+          {% endif %}
+          <p style="margin:8px 0 0 0;font-size:14px;line-height:18px;font-weight:700;color:#ffffff;">{{ c.title }}</p>
+          {% if c.subtitle %}<p style="margin:2px 0 0 0;font-size:12px;line-height:16px;color:#8b8b95;">{{ c.subtitle }}</p>{% endif %}
+          <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-top:10px;"><tr>
+            <td style="border-radius:4px;background-color:#ffffff;">
+              <a href="{{ link(c) }}" target="_blank" style="display:inline-block;padding:6px 12px;font-size:12px;line-height:16px;font-weight:700;color:#0b0b0f;text-decoration:none;border-radius:4px;">&#9654;&nbsp;{{ s.watch_now }}</a>
+            </td>
+          </tr></table>
+        </td></tr>
+      </table>
+    </div>
+    <!--[if mso]></td><![endif]-->
+    {% endfor %}
+    <!--[if mso]></tr></table><![endif]-->
+    {% endfor %}
+  </td></tr>
+  {% endfor %}
+
+  {% if server_url %}
+  <tr><td align="center" style="padding:32px 32px 8px 32px;">
+    <!--[if mso]>
+    <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" href="{{ server_url }}" style="height:44px;v-text-anchor:middle;width:240px;" arcsize="12%" stroke="f" fillcolor="#e11d48">
+    <w:anchorlock/><center style="color:#ffffff;font-family:Arial,sans-serif;font-size:15px;font-weight:bold;">{{ s.open_server.format(server=server) }}</center>
+    </v:roundrect>
+    <![endif]-->
+    <!--[if !mso]><!-->
+    <a href="{{ server_url }}" target="_blank" style="display:inline-block;background-color:#e11d48;color:#ffffff;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;font-size:15px;font-weight:700;line-height:44px;padding:0 28px;border-radius:6px;text-decoration:none;">{{ s.open_server.format(server=server) }}</a>
+    <!--<![endif]-->
+  </td></tr>
+  {% endif %}
+
+  <tr><td class="px" style="padding:24px 32px 28px 32px;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
+    <p style="margin:0;border-top:1px solid #26262e;padding-top:16px;font-size:12px;line-height:18px;color:#6b6b75;">{{ s.footer.format(server=server) }}</p>
+  </td></tr>
+
+</table>
+<!--[if mso]></td></tr></table><![endif]-->
+</td></tr>
+</table>
+</body>
+</html>
