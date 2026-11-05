@@ -27,3 +27,5 @@ a fix before you disclose the issue publicly.
 - API keys and the SMTP password are stored in the SQLite database in `/data`. Protect that volume
   and its backups.
 - Use a Jellyfin API key dedicated to Last Call, so you can revoke it independently.
+- The Plex token is your server owner's token. Treat it like a password; Last Call removes it from
+  error messages and logs.

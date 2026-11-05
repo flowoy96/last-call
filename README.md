@@ -2,7 +2,7 @@
 
 # Last Call
 
-**E-mail your Jellyfin users what is leaving soon (via Maintainerr) and what is new, styled like a streaming service's newsletter.**
+**E-mail your Jellyfin and Plex users what is leaving soon (via Maintainerr) and what is new, styled like a streaming service's newsletter.**
 
 [![build](https://github.com/flowoy96/last-call/actions/workflows/docker.yml/badge.svg)](https://github.com/flowoy96/last-call/actions/workflows/docker.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-e11d48.svg)](LICENSE)
@@ -20,20 +20,21 @@
 
 ### Was ist Last Call?
 
-Last Call ist eine kleine, selbstgehostete Web-App. Sie schickt deinen Jellyfin-Nutzerinnen und -Nutzern regelmäßig eine E-Mail mit:
+Last Call ist eine kleine, selbstgehostete Web-App. Sie schickt den Nutzerinnen und Nutzern deines **Jellyfin- und/oder Plex-Servers** regelmäßig eine E-Mail mit:
 
 - **Bald nicht mehr verfügbar**: Titel aus deinen Maintainerr-Collections mit dem berechneten Löschdatum (Datum der Aufnahme in die Collection + „Take action after days“).
 - **Neu hinzugefügt**: Filme, Serien und neue Folgen seit der letzten Mail.
 - **Empfehlungen für dich** *(optional)*: noch nicht gesehene Filme und Serien, die zu den Genres passen, die die Person am meisten schaut.
 - **Mal wieder schauen?** *(optional)*: eine Handvoll Filme, die die Person schon gesehen hat, aber schon länger nicht mehr (Standard: seit mindestens 180 Tagen).
 
-Jede Person bekommt nur Titel aus Bibliotheken, auf die sie in Jellyfin Zugriff hat. Leere Abschnitte fallen weg, und ganz leere Mails werden gar nicht erst verschickt.
+Wer beide Server nutzt, bekommt wahlweise eine **kombinierte Mail** für Jellyfin und Plex oder nur die Mail für einen der beiden. Jede Person bekommt nur Titel aus Bibliotheken, auf die sie Zugriff hat. Leere Abschnitte fallen weg, und ganz leere Mails werden gar nicht erst verschickt.
 
 ### Funktionen
 
 - Ein einziger Container (Python, Starlette, SQLite). Kein Datenbank-Container und kein JavaScript-Framework. Image für `amd64` und `arm64`.
 - Einrichtung komplett im Web-UI, keine Secrets in Umgebungsvariablen nötig. API-Keys und Passwörter werden maskiert angezeigt.
-- Empfänger per Klick aus Jellyfin importieren, E-Mail-Adresse pro Person hinterlegen und einzeln aktivieren.
+- **Jellyfin und Plex**, getrennt einstellbar und einzeln abschaltbar, jeweils mit eigener (oder gemeinsamer) Maintainerr-Instanz.
+- Empfänger per Klick aus Jellyfin und Plex importieren. Plex liefert die E-Mail-Adressen gleich mit. Gleichnamige Konten werden automatisch zu einer Person verknüpft. Pro Person wählst du: **beide Server in einer Mail**, nur Jellyfin oder nur Plex.
 - Dunkles Mail-Design im Streaming-Look: Poster-Raster, Löschdatum als Badge, „Jetzt ansehen“-Deep-Links in Jellyfin. Tabellen-Layout mit Inline-CSS, responsiv, mit Outlook-Fallbacks.
 - Poster werden verkleinert (ca. 5 KB pro Bild) und als CID-Anhang eingebettet. Jellyfin muss dafür nicht öffentlich erreichbar sein.
 - **Keine Duplikate**: Derselbe Titel in mehreren Versionen (z. B. 1080p in „Filme“ und 4K in „Filme 4K“) erscheint nur einmal. Ein Film, dessen 1080p-Kopie gelöscht wird, während die 4K-Kopie bleibt, steht nicht unter „Bald weg“. Eine neue 4K-Version eines alten Films zählt nicht als „neu“. Kein Titel erscheint in zwei Abschnitten, und Vorschläge wiederholen sich für eine einstellbare Zeit nicht (Standard: 90 Tage).
@@ -85,8 +86,8 @@ volumes:
 ```
 
 3. `http://<host>:8080` öffnen und den Admin-Account anlegen.
-4. Unter **Settings** Jellyfin, Maintainerr und SMTP eintragen, speichern und mit den Test-Buttons prüfen.
-5. Unter **Recipients** auf **Import users from Jellyfin** klicken, E-Mail-Adressen eintragen und Empfänger aktivieren.
+4. Unter **Settings** Jellyfin und/oder Plex, Maintainerr und SMTP eintragen, speichern und mit den Test-Buttons prüfen.
+5. Unter **Recipients** die User aus Jellyfin und/oder Plex importieren, E-Mail-Adressen prüfen, pro Person den Server bzw. „beide“ wählen und aktivieren.
 6. Unter **Preview** die Mail ansehen und bei Bedarf sofort senden.
 
 Ohne Docker Compose geht es auch so:
@@ -104,7 +105,10 @@ Alles Wesentliche wird im Web-UI eingestellt und in `/data/lastcall.db` (SQLite)
 | Jellyfin-URL (intern) | Adresse, unter der Last Call Jellyfin erreicht, z. B. `http://jellyfin:8096` |
 | Jellyfin-API-Key | Jellyfin → Dashboard → API-Schlüssel → `+` |
 | Öffentliche Jellyfin-URL | Wird für die Links in der Mail verwendet, z. B. `https://jellyfin.example.com` |
-| Maintainerr-URL | z. B. `http://maintainerr:6246`. Maintainerr hat selbst keine API-Authentifizierung. Das optionale API-Key-Feld wird als `X-Api-Key`-Header mitgeschickt, etwa für einen Reverse Proxy. |
+| Maintainerr-URL (je Server) | z. B. `http://maintainerr:6246`. Für Jellyfin und Plex getrennt einstellbar. Eine Instanz, die beide bedient, trägst du einfach zweimal ein: Last Call trennt die Collections nach Server-Typ. Maintainerr hat selbst keine API-Authentifizierung. Das optionale API-Key-Feld wird als `X-Api-Key`-Header mitgeschickt, etwa für einen Reverse Proxy. |
+| Plex-Server-URL | Adresse, unter der Last Call Plex erreicht, z. B. `http://plex:32400` |
+| Plex-Token | Token des Server-Besitzers ([so findest du ihn](https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/)). Damit holt Last Call bei plex.tv die Liste der freigegebenen User samt E-Mail-Adresse und deren Zugriffs-Token für deinen Server. |
+| Öffentliche Plex-URL | Optional. Leer: Links öffnen `app.plex.tv`. Gesetzt (z. B. `https://plex.example.com`): Links öffnen deinen Server direkt. |
 | SMTP | Host, Port, STARTTLS/SSL/keine, Benutzer, Passwort, Absendername und -adresse |
 | Zeitplan | Täglich, wöchentlich, alle 2 Wochen (gerade Kalenderwochen) oder monatlich (erster gewählter Wochentag im Monat), feste Uhrzeit (Zeitzone aus `TZ`) |
 | Empfehlungen | An/aus und Anzahl (Standard: 6, halb Filme, halb Serien) |
@@ -122,6 +126,8 @@ Umgebungsvariablen (alle optional):
 | `LOG_LEVEL` | `INFO` | Log-Level |
 
 **So wird das Löschdatum berechnet:** Für jede aktive Maintainerr-Collection mit einer Aktion, die Dateien entfernt (*Delete*, *Unmonitor and delete*, *Delete show if empty*), und mit gesetztem *Take action after days* gilt: Datum der Aufnahme in die Collection + Tage. Steht ein Titel in mehreren Collections, gilt das früheste Datum. Collections mit *Do nothing*, *Unmonitor* oder *Change quality profile* werden ignoriert.
+
+**Plex und Jellyfin in einer Mail:** Bei „beide Server“ werden die Bibliotheken beider Server zusammengeführt. Ein Titel, der auf beiden liegt, erscheint nur einmal. Ein Titel, der auf einem Server gelöscht wird, aber auf dem anderen bleibt, steht nicht unter „Bald weg“. Was jemand auf einem Server gesehen hat, wird auf dem anderen nicht empfohlen. Jede Karte zeigt, auf welchem Server der Titel liegt, und „Jetzt ansehen“ öffnet den passenden Server.
 
 **„Neu hinzugefügt“** umfasst alles seit der letzten erfolgreich versendeten Mail an diese Person. Bei der ersten Mail wird so viele Tage zurückgeschaut, wie in den Einstellungen festgelegt ist (Standard: 7).
 
@@ -141,7 +147,7 @@ Die Daten im Volume `/data` bleiben dabei erhalten.
 
 ### FAQ
 
-**Muss Jellyfin öffentlich erreichbar sein?**
+**Muss Jellyfin/Plex öffentlich erreichbar sein?**
 Nein. Poster werden eingebettet. Nur die „Jetzt ansehen“-Links zeigen auf die öffentliche URL. Ohne öffentliche URL funktionieren sie nur im Heimnetz.
 
 **Löscht Last Call etwas?**
@@ -149,6 +155,9 @@ Nein. Last Call liest nur. Gelöscht wird ausschließlich von Maintainerr.
 
 **Gibt es OIDC/SSO (z. B. Authentik)?**
 Nicht eingebaut, um die App schlank zu halten. Stell Last Call hinter deinen Reverse Proxy mit Forward Auth (Authentik-Proxy-Provider, Authelia …). Der eingebaute Admin-Login bleibt zusätzlich aktiv.
+
+**Welche Plex-User werden importiert?**
+Der Besitzer des Servers und alle User, mit denen der Server geteilt ist (laut plex.tv). Plex-Home-User ohne eigenes plex.tv-Konto werden nicht importiert.
 
 **Warum ist die Weboberfläche englisch?**
 Damit der Code klein bleibt. Die E-Mails gibt es auf Deutsch und Englisch.
@@ -167,7 +176,7 @@ Das Template verwendet die üblichen E-Mail-Techniken: Tabellen, Inline-Styles, 
 
 ### Lizenz und Haftungsausschluss
 
-[MIT](LICENSE). Die Software wird „wie besehen“ ohne Gewährleistung bereitgestellt, die Nutzung erfolgt auf eigenes Risiko. Es gibt keine Haftung für Schäden, Datenverlust oder versehentliche Löschungen. Dieses Projekt ist nicht mit Jellyfin, Maintainerr oder anderen genannten Projekten verbunden und wird von ihnen nicht unterstützt. Marken gehören ihren Inhabern. Last Call stellt keine Medieninhalte bereit und ist nicht für die Verbreitung urheberrechtlich geschützter Inhalte gedacht. Du bist selbst für die Rechtmäßigkeit deiner Mediathek verantwortlich. Als Betreiberin oder Betreiber bist du außerdem selbst für den Datenschutz (DSGVO) beim Speichern von E-Mail-Adressen und beim Versand verantwortlich, einschließlich der Einwilligung der Empfängerinnen und Empfänger. Details stehen in [DISCLAIMER.md](DISCLAIMER.md).
+[MIT](LICENSE). Die Software wird „wie besehen“ ohne Gewährleistung bereitgestellt, die Nutzung erfolgt auf eigenes Risiko. Es gibt keine Haftung für Schäden, Datenverlust oder versehentliche Löschungen. Dieses Projekt ist nicht mit Jellyfin, Plex, Maintainerr oder anderen genannten Projekten verbunden und wird von ihnen nicht unterstützt. Marken gehören ihren Inhabern. Last Call stellt keine Medieninhalte bereit und ist nicht für die Verbreitung urheberrechtlich geschützter Inhalte gedacht. Du bist selbst für die Rechtmäßigkeit deiner Mediathek verantwortlich. Als Betreiberin oder Betreiber bist du außerdem selbst für den Datenschutz (DSGVO) beim Speichern von E-Mail-Adressen und beim Versand verantwortlich, einschließlich der Einwilligung der Empfängerinnen und Empfänger. Details stehen in [DISCLAIMER.md](DISCLAIMER.md).
 
 ---
 
@@ -175,20 +184,21 @@ Das Template verwendet die üblichen E-Mail-Techniken: Tabellen, Inline-Styles, 
 
 ### What is Last Call?
 
-Last Call is a small self-hosted web app. It periodically e-mails your Jellyfin users:
+Last Call is a small self-hosted web app. It periodically e-mails the users of your **Jellyfin and/or Plex server**:
 
 - **Leaving soon**: titles from your Maintainerr collections with their calculated removal date (date added to the collection + "take action after days").
 - **Recently added**: movies, shows and new episodes since their last e-mail.
 - **Recommended for you** *(optional)*: unwatched movies and shows that match the genres the user watches most.
 - **Watch it again?** *(optional)*: a handful of movies the user has seen, but not for a long time (default: at least 180 days ago).
 
-Each user only sees titles from libraries they can access in Jellyfin. Empty sections are left out, and completely empty e-mails are never sent.
+People who use both servers get either **one combined mail** for Jellyfin and Plex or a mail for just one of them, as you choose. Each user only sees titles from libraries they can access. Empty sections are left out, and completely empty e-mails are never sent.
 
 ### Features
 
 - One container (Python, Starlette, SQLite). No database container and no JavaScript framework. `amd64` and `arm64` images.
 - Configured entirely in the web UI, so no secrets are needed in environment variables. API keys and passwords are masked.
-- Import recipients from Jellyfin with one click, add an e-mail address per user and enable each one individually.
+- **Jellyfin and Plex**, configured separately and individually switchable, each with its own (or a shared) Maintainerr instance.
+- Import recipients from Jellyfin and Plex with one click. Plex provides e-mail addresses. Accounts with the same name are linked to one person automatically. Per person you choose: **both servers in one mail**, Jellyfin only or Plex only.
 - Dark, streaming-style e-mail: poster grid, removal date badge, "Watch now" deep links into Jellyfin. Table layout with inline CSS, responsive, with Outlook fallbacks.
 - Posters are resized (around 5 KB each) and embedded as CID attachments, so Jellyfin does not need to be publicly reachable.
 - **No duplicates**: the same title in several versions (e.g. 1080p in "Movies" and 4K in "Movies 4K") is listed once. A movie whose 1080p copy is deleted while the 4K copy stays is not shown as leaving. A new 4K version of an old movie does not count as "new". No title appears in two sections, and suggestions are not repeated for a configurable time (default: 90 days).
@@ -205,8 +215,8 @@ See the [screenshots above](#screenshots). All titles and posters shown are made
 1. In Portainer go to **Stacks → Add stack → Web editor**.
 2. Paste [`docker-compose.yml`](docker-compose.yml) (same content as in the German section) and click **Deploy the stack**.
 3. Open `http://<host>:8080` and create the admin account.
-4. In **Settings**, enter Jellyfin, Maintainerr and SMTP, save, and use the test buttons.
-5. In **Recipients**, click **Import users from Jellyfin**, add e-mail addresses and enable recipients.
+4. In **Settings**, enter Jellyfin and/or Plex, Maintainerr and SMTP, save, and use the test buttons.
+5. In **Recipients**, import users from Jellyfin and/or Plex, check the e-mail addresses, choose a server (or both) per person and enable them.
 6. In **Preview**, check the e-mail and send it right away if you like.
 
 ### Configuration
@@ -218,7 +228,10 @@ Everything is configured in the web UI and stored in `/data/lastcall.db` (SQLite
 | Jellyfin URL (internal) | How Last Call reaches Jellyfin, e.g. `http://jellyfin:8096` |
 | Jellyfin API key | Jellyfin → Dashboard → API Keys → `+` |
 | Public Jellyfin URL | Used for links in the e-mail, e.g. `https://jellyfin.example.com` |
-| Maintainerr URL | e.g. `http://maintainerr:6246`. Maintainerr has no API authentication of its own. The optional API key is sent as an `X-Api-Key` header, e.g. for a reverse proxy. |
+| Maintainerr URL (per server) | e.g. `http://maintainerr:6246`, set separately for Jellyfin and Plex. If one instance serves both, enter it twice: Last Call splits the collections by server type. Maintainerr has no API authentication of its own. The optional API key is sent as an `X-Api-Key` header, e.g. for a reverse proxy. |
+| Plex server URL | How Last Call reaches Plex, e.g. `http://plex:32400` |
+| Plex token | The server owner's token ([how to find it](https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/)). Last Call uses it to get the list of shared users, with their e-mail addresses and access tokens for your server, from plex.tv. |
+| Public Plex URL | Optional. Empty: links open `app.plex.tv`. Set (e.g. `https://plex.example.com`): links open your server directly. |
 | SMTP | Host, port, STARTTLS/SSL/none, user, password, sender name and address |
 | Schedule | Daily, weekly, every 2 weeks (even calendar weeks) or monthly (first chosen weekday of the month), at a fixed time (time zone from `TZ`) |
 | Recommendations | On/off and number (default: 6, half movies, half shows) |
@@ -236,6 +249,8 @@ Environment variables (all optional):
 | `LOG_LEVEL` | `INFO` | Log level |
 
 **How the removal date is calculated:** for every active Maintainerr collection whose action removes files (*Delete*, *Unmonitor and delete*, *Delete show if empty*) and that has *take action after days* set, the date is: date added to the collection + days. If a title is in several collections, the earliest date wins. Collections with *Do nothing*, *Unmonitor* or *Change quality profile* are ignored.
+
+**Plex and Jellyfin in one mail:** with "both servers", the libraries of both servers are merged. A title on both servers is listed once. A title that is deleted on one server but stays on the other is not shown as leaving. Anything a person watched on one server is not recommended on the other. Each card shows which server the title is on, and "Watch now" opens the right server.
 
 **"Recently added"** covers everything since the last e-mail successfully sent to that user. For their first e-mail, Last Call looks back the number of days configured in the settings (default: 7).
 
@@ -255,7 +270,7 @@ Your data in the `/data` volume is kept.
 
 ### FAQ
 
-**Does Jellyfin need to be publicly reachable?**
+**Does Jellyfin/Plex need to be publicly reachable?**
 No. Posters are embedded. Only the "Watch now" links point to the public URL. Without one, they only work inside your home network.
 
 **Does Last Call delete anything?**
@@ -263,6 +278,9 @@ No. It only reads data. Deleting is done exclusively by Maintainerr.
 
 **OIDC/SSO (e.g. Authentik)?**
 Not built in, to keep the app small. Put Last Call behind your reverse proxy with forward auth (Authentik proxy provider, Authelia, …). The built-in admin login stays active as well.
+
+**Which Plex users are imported?**
+The server owner and every user the server is shared with (according to plex.tv). Plex Home users without their own plex.tv account are not imported.
 
 **Why is the web UI in English?**
 To keep the code small. The e-mails are available in German and English.
@@ -281,6 +299,6 @@ The template uses the usual e-mail techniques: tables, inline styles, a fluid-hy
 
 ### License and disclaimer
 
-[MIT](LICENSE). The software is provided "as is", without warranty of any kind, and you use it at your own risk. There is no liability for damages, data loss or accidental deletions. This project is not affiliated with or endorsed by Jellyfin, Maintainerr or any other project mentioned. Trademarks belong to their owners. Last Call provides no media content and is not intended for distributing copyrighted material. You are responsible for the legality of your media library. As an operator, you are also responsible for data protection (GDPR) when storing e-mail addresses and sending e-mails, including obtaining your recipients' consent. See [DISCLAIMER.md](DISCLAIMER.md).
+[MIT](LICENSE). The software is provided "as is", without warranty of any kind, and you use it at your own risk. There is no liability for damages, data loss or accidental deletions. This project is not affiliated with or endorsed by Jellyfin, Plex, Maintainerr or any other project mentioned. Trademarks belong to their owners. Last Call provides no media content and is not intended for distributing copyrighted material. You are responsible for the legality of your media library. As an operator, you are also responsible for data protection (GDPR) when storing e-mail addresses and sending e-mails, including obtaining your recipients' consent. See [DISCLAIMER.md](DISCLAIMER.md).
 
 Third-party: [Pico CSS](https://picocss.com) (MIT) is bundled in `app/static/`.

@@ -10,15 +10,16 @@ python3 -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt pytest aiosmtpd
 pytest -q
 
-# fake Jellyfin + Maintainerr API with made-up titles and generated posters
-python scripts/demo_server.py 8899 &
+# fake Jellyfin + Maintainerr (:8899) and Plex + plex.tv (:8898) with made-up titles and generated posters
+python scripts/demo_server.py &
 # SMTP sink that stores mails as .eml files
 python scripts/smtp_sink.py ./mails &
-LASTCALL_DATA=./data uvicorn app.main:app --reload --port 8080
+LASTCALL_DATA=./data LASTCALL_PLEX_TV_URL=http://127.0.0.1:8898 uvicorn app.main:app --reload --port 8080
 ```
 
 Then open http://localhost:8080, create the admin and use `http://127.0.0.1:8899` as the Jellyfin and
-Maintainerr URL, `127.0.0.1:2525` without encryption as SMTP.
+Maintainerr URL (for both servers), `http://127.0.0.1:8898` with token `demo-plex-token` for Plex and
+`127.0.0.1:2525` without encryption as SMTP.
 
 ## Guidelines
 
