@@ -28,10 +28,16 @@ def _clean(url: str) -> str:
 # --------------------------------------------------------------------------
 
 class Jellyfin:
-    def __init__(self, url: str, api_key: str):
+    key = "jellyfin"
+    product = "Jellyfin"
+
+    def __init__(self, url: str, api_key: str, public_url: str = "", label: str = ""):
         if not url or not api_key:
             raise ApiError("Jellyfin URL and API key must be configured")
         self.base = _clean(url)
+        self.public_url = _clean(public_url) or self.base
+        self.label = label or "Jellyfin"
+        self.server_id = ""
         self.client = httpx.Client(
             base_url=self.base,
             timeout=TIMEOUT,
@@ -57,10 +63,30 @@ class Jellyfin:
             r.raise_for_status()
         except httpx.HTTPError as e:
             raise ApiError(f"Jellyfin request {path} failed: {e}") from e
-        return r.json()
+        data = r.json()
+        if isinstance(data, dict):
+            for it in data.get("Items", []):
+                it["_src"] = self.key
+        return data
 
     def system_info(self) -> dict:
-        return self._get("/System/Info")
+        info = self._get("/System/Info")
+        self.server_id = info.get("Id", "")
+        return info
+
+    def connect(self) -> None:
+        self.system_info()
+
+    def link(self, item_id: str) -> str:
+        url = f"{self.public_url}/web/#/details?id={item_id}"
+        return f"{url}&serverId={self.server_id}" if self.server_id else url
+
+    def home_url(self) -> str:
+        return f"{self.public_url}/web/"
+
+    def accounts(self) -> list[dict]:
+        """Users for the recipients list: id, name, email (Jellyfin has no e-mail)."""
+        return [{"id": u["Id"], "name": u["Name"], "email": ""} for u in self.users()]
 
     def users(self) -> list[dict]:
         return [u for u in self._get("/Users") if not u.get("Policy", {}).get("IsDisabled")]
@@ -209,8 +235,11 @@ class Maintainerr:
             col["media"] = m.json() if m.status_code == 200 else []
         return collections
 
-    def pending_deletions(self, tz) -> dict[str, PendingDeletion]:
-        """Map of media-server item id -> earliest planned removal date."""
+    def pending_deletions(self, tz, server: str = "jellyfin") -> dict[str, PendingDeletion]:
+        """Map of media-server item id -> earliest planned removal date.
+
+        `server` is "jellyfin" or "plex". Collections without a mediaServerType
+        come from Maintainerr versions before Jellyfin support, i.e. Plex."""
         result: dict[str, PendingDeletion] = {}
         for col in self.collections_with_media():
             if not col.get("isActive", True):
@@ -218,8 +247,7 @@ class Maintainerr:
             days = col.get("deleteAfterDays")
             if days is None or col.get("arrAction") not in REMOVING_ACTIONS:
                 continue
-            server_type = col.get("mediaServerType")
-            if server_type and server_type != "jellyfin":
+            if (col.get("mediaServerType") or "plex") != server:
                 continue
             for media in col.get("media") or []:
                 media_id = media.get("mediaServerId") or media.get("plexId")

@@ -21,6 +21,7 @@ from PIL import Image
 
 from . import db, mailer
 from .clients import ApiError, Jellyfin, Maintainerr, PendingDeletion, parse_dt
+from .plex import Plex
 from .i18n import format_date, format_month, t
 
 log = logging.getLogger("lastcall.digest")
@@ -56,6 +57,7 @@ class Card:
     item_id: str        # item opened by the deep link
     poster_id: str      # item whose primary image is used
     title: str
+    src: str = "jellyfin"  # media server the item lives on
     subtitle: str = ""
     badge: str = ""
     keys: frozenset = frozenset()
@@ -66,6 +68,7 @@ class Card:
 class Digest:
     user_id: str
     user_name: str
+    sources: list[str] = field(default_factory=list)  # servers this mail covers
     leaving: list[Card] = field(default_factory=list)
     new: list[Card] = field(default_factory=list)
     reco: list[Card] = field(default_factory=list)
@@ -86,24 +89,84 @@ class Digest:
 class Context:
     """Data shared across all recipients of one run."""
     settings: dict
-    jf: Jellyfin
-    server_id: str
-    deletions: dict[str, PendingDeletion]
+    sources: dict          # "jellyfin" / "plex" -> client
+    deletions: dict        # source key -> {item id -> PendingDeletion}
     tz: ZoneInfo
+    errors: dict = field(default_factory=dict)  # source key -> why it is unavailable
+
+    def close(self) -> None:
+        for src in self.sources.values():
+            src.close()
 
 
-def open_context(settings: dict) -> Context:
-    jf = Jellyfin(settings["jellyfin_url"], settings["jellyfin_api_key"])
+SERVER_KEYS = ("jellyfin", "plex")
+
+
+def configured_servers(settings: dict) -> list[str]:
+    out = []
+    if settings.get("jellyfin_enabled", "1") == "1" and settings.get("jellyfin_url"):
+        out.append("jellyfin")
+    if settings.get("plex_enabled") == "1" and settings.get("plex_url"):
+        out.append("plex")
+    return out
+
+
+def open_source(key: str, settings: dict):
+    if key == "jellyfin":
+        src = Jellyfin(settings["jellyfin_url"], settings["jellyfin_api_key"],
+                       settings.get("jellyfin_public_url", ""), settings.get("server_name") or "Jellyfin")
+    else:
+        src = Plex(settings["plex_url"], settings["plex_token"],
+                   settings.get("plex_public_url", ""), settings.get("plex_server_name") or "")
     try:
-        server_id = jf.system_info().get("Id", "")
-        deletions: dict[str, PendingDeletion] = {}
-        if settings.get("maintainerr_url"):
-            with Maintainerr(settings["maintainerr_url"], settings.get("maintainerr_api_key", "")) as m:
-                deletions = m.pending_deletions(local_tz())
+        src.connect()
     except Exception:
-        jf.close()
+        src.close()
         raise
-    return Context(settings, jf, server_id, deletions, local_tz())
+    return src
+
+
+def open_context(settings: dict, only: set[str] | None = None) -> Context:
+    """Connect to every enabled media server (and its Maintainerr). A server that
+    fails is recorded in `errors`; the others keep working."""
+    tz = local_tz()
+    ctx = Context(settings, {}, {}, tz)
+    for key in configured_servers(settings):
+        if only is not None and key not in only:
+            continue
+        try:
+            ctx.sources[key] = open_source(key, settings)
+        except Exception as e:  # noqa: BLE001
+            ctx.errors[key] = str(e)
+            continue
+        url_key, api_key = ("maintainerr_url", "maintainerr_api_key") if key == "jellyfin" else \
+                           ("plex_maintainerr_url", "plex_maintainerr_api_key")
+        ctx.deletions[key] = {}
+        if settings.get(url_key):
+            try:
+                with Maintainerr(settings[url_key], settings.get(api_key, "")) as m:
+                    ctx.deletions[key] = m.pending_deletions(tz, key)
+            except Exception as e:  # noqa: BLE001
+                ctx.errors[f"maintainerr ({key})"] = str(e)
+    return ctx
+
+
+def accounts_for(person, ctx: Context) -> tuple[list[tuple[object, str]], list[str]]:
+    """(source, user id) pairs this person's mail covers, plus problems."""
+    choice = person["servers"] if person["servers"] in ("jellyfin", "plex") else "both"
+    wanted = SERVER_KEYS if choice == "both" else (choice,)
+    pairs, problems = [], []
+    for key in wanted:
+        uid = person[f"{key}_id"]
+        if not uid:
+            if choice != "both":
+                problems.append(f"no {key} account linked")
+            continue
+        if key not in ctx.sources:
+            problems.append(ctx.errors.get(key) or f"{key} is not enabled")
+            continue
+        pairs.append((ctx.sources[key], uid))
+    return pairs, problems
 
 
 # --------------------------------------------------------------------------
@@ -127,9 +190,14 @@ def norm_id(item_id: str) -> str:
     return item_id.replace("-", "").lower()
 
 
+def uid(item: dict) -> str:
+    """Item id that is unique across servers."""
+    return f"{item.get('_src', 'jellyfin')}:{norm_id(item['Id'])}"
+
+
 def item_keys(item: dict) -> frozenset:
     kind = item.get("Type", "")
-    keys = {f"id:{norm_id(item['Id'])}"}
+    keys = {f"id:{uid(item)}"}
     if kind == "Season":
         keys.add(f"season:{_norm(item.get('SeriesName'))}:{item.get('IndexNumber')}")
         return frozenset(keys)
@@ -150,7 +218,7 @@ class Library:
 
     def __init__(self, items: list[dict]):
         self.items = items
-        self.by_id = {norm_id(i["Id"]): i for i in items}
+        self.by_uid = {uid(i): i for i in items}
         self._index: dict[str, list[dict]] = defaultdict(list)
         for it in items:
             it["_keys"] = item_keys(it)
@@ -159,12 +227,12 @@ class Library:
 
     def copies(self, item: dict) -> list[dict]:
         """Other library items that are the same title as `item`."""
-        own = norm_id(item["Id"])
+        own = uid(item)
         found = {}
         for k in item_keys(item):
             for other in self._index.get(k, ()):
-                if norm_id(other["Id"]) != own:
-                    found[norm_id(other["Id"])] = other
+                if uid(other) != own:
+                    found[uid(other)] = other
         return list(found.values())
 
 
@@ -198,6 +266,12 @@ def _int(settings: dict, key: str, default: int) -> int:
 
 
 def _card_for_leaving(item: dict, lang: str) -> Card:
+    card = _leaving_card(item, lang)
+    card.src = item.get("_src", "jellyfin")
+    return card
+
+
+def _leaving_card(item: dict, lang: str) -> Card:
     s = t(lang)
     kind = item.get("Type")
     item_id = item["Id"]
@@ -207,12 +281,12 @@ def _card_for_leaving(item: dict, lang: str) -> Card:
         n = item.get("IndexNumber")
         sub = s["season"].format(n=n) if n is not None else item.get("Name", "")
         poster = item_id if item.get("ImageTags", {}).get("Primary") else item.get("SeriesId", item_id)
-        return Card(item_id, poster, title, sub, keys=keys)
+        return Card(item_id, poster, title, subtitle=sub, keys=keys)
     if kind == "Episode":
         title = item.get("SeriesName") or item.get("Name", "")
         sub = f"S{item.get('ParentIndexNumber') or 0:02d}E{item.get('IndexNumber') or 0:02d} · {item.get('Name', '')}"
-        return Card(item_id, item.get("SeriesId", item_id), title, sub, keys=keys)
-    return Card(item_id, item_id, item.get("Name", ""), _year(item), keys=keys)
+        return Card(item_id, item.get("SeriesId", item_id), title, subtitle=sub, keys=keys)
+    return Card(item_id, item_id, item.get("Name", ""), subtitle=_year(item), keys=keys)
 
 
 def _user_data(item: dict) -> dict:
@@ -232,26 +306,30 @@ def _weighted_pick(rnd: random.Random, candidates: list[tuple[float, dict]], k: 
     return [it for _, it in keyed[:k]]
 
 
-def _leaving(ctx: Context, user_id: str, lib: Library, seen: Seen, lang: str) -> list[Card]:
-    if not ctx.deletions:
-        return []
+def _leaving(ctx: Context, accounts, lib: Library, seen: Seen, lang: str) -> list[Card]:
     s = t(lang)
     today = datetime.now(ctx.tz).date()
-    visible = ctx.jf.items_by_ids(user_id, list(ctx.deletions))
-    visible.sort(key=lambda i: ctx.deletions.get(norm_id(i["Id"]), PendingDeletion("", today, "")).delete_on)
-    cards = []
-    for item in visible:
-        pending = ctx.deletions.get(norm_id(item["Id"]))
-        if not pending:
+    scheduled = {f"{key}:{mid}" for key, dels in ctx.deletions.items() for mid in dels}
+    visible: list[tuple[PendingDeletion, dict]] = []
+    for src, user in accounts:
+        dels = ctx.deletions.get(src.key) or {}
+        if not dels:
             continue
+        for item in src.items_by_ids(user, list(dels)):
+            pending = dels.get(norm_id(item["Id"]))
+            if pending:
+                visible.append((pending, item))
+    visible.sort(key=lambda x: x[0].delete_on)
+    cards = []
+    for pending, item in visible:
         keys = item_keys(item)
         if seen.has(keys):
             continue  # another copy of this title is already listed
         if item.get("Type") in ("Movie", "Series"):
-            remaining = [c for c in lib.copies(item) if norm_id(c["Id"]) not in ctx.deletions]
+            remaining = [c for c in lib.copies(item) if uid(c) not in scheduled]
             if remaining:
                 seen.add(keys)
-                continue  # e.g. the 1080p copy goes, the 4K copy stays: nothing is really leaving
+                continue  # another copy stays (other version, library or server): nothing really leaves
         card = _card_for_leaving(item, lang)
         when = max(pending.delete_on, today)
         card.badge = s["leaves_today"] if when == today else s["leaves_on"].format(date=format_date(when, lang))
@@ -262,10 +340,12 @@ def _leaving(ctx: Context, user_id: str, lib: Library, seen: Seen, lang: str) ->
     return cards[:MAX_LEAVING]
 
 
-def _new(ctx: Context, user_id: str, lib: Library, seen: Seen, since: datetime, lang: str) -> list[Card]:
+def _new(ctx: Context, accounts, lib: Library, seen: Seen, since: datetime, lang: str) -> list[Card]:
     s = t(lang)
     found: list[tuple[datetime, Card]] = []
-    for item in ctx.jf.recently_added(user_id, "Movie,Series", since):
+    added = [it for src, user in accounts for it in src.recently_added(user, "Movie,Series", since)]
+    added.sort(key=lambda i: parse_dt(i.get("DateCreated")) or since, reverse=True)
+    for item in added:
         keys = item_keys(item)
         if seen.has(keys):
             continue
@@ -274,23 +354,26 @@ def _new(ctx: Context, user_id: str, lib: Library, seen: Seen, since: datetime, 
         if older:
             continue  # just another version (e.g. 4K) of a title that was already there
         created = parse_dt(item.get("DateCreated")) or since
-        found.append((created, Card(item["Id"], item["Id"], item.get("Name", ""), _year(item),
-                                    s["new_badge"], keys=keys)))
+        found.append((created, Card(item["Id"], item["Id"], item.get("Name", ""), item.get("_src", "jellyfin"),
+                                    _year(item), s["new_badge"], keys=keys)))
 
     # New episodes, grouped per series. Copies of a series in several libraries
     # are merged, and the same episode in several qualities is counted once.
     groups: list[dict] = []
-    for ep in ctx.jf.recently_added(user_id, "Episode", since, limit=500):
+    episodes = [ep for src, user in accounts for ep in src.recently_added(user, "Episode", since, limit=500)]
+    for ep in episodes:
         sid = ep.get("SeriesId")
         if not sid:
             continue
-        series = lib.by_id.get(norm_id(sid))
-        skeys = series["_keys"] if series else frozenset({f"id:{norm_id(sid)}"})
+        src_key = ep.get("_src", "jellyfin")
+        series = lib.by_uid.get(f"{src_key}:{norm_id(sid)}")
+        skeys = series["_keys"] if series else frozenset({f"id:{src_key}:{norm_id(sid)}"})
         if seen.has(skeys):
             continue  # whole series is already shown as new (or leaving)
         group = next((g for g in groups if not g["keys"].isdisjoint(skeys)), None)
         if group is None:
-            group = {"keys": set(skeys), "sid": sid, "name": ep.get("SeriesName", ""), "eps": set(), "newest": since}
+            group = {"keys": set(skeys), "sid": sid, "src": src_key, "name": ep.get("SeriesName", ""),
+                     "eps": set(), "newest": since}
             groups.append(group)
         group["keys"] |= skeys
         group["eps"].add((ep.get("ParentIndexNumber"), ep.get("IndexNumber"), _norm(ep.get("Name"))))
@@ -299,7 +382,8 @@ def _new(ctx: Context, user_id: str, lib: Library, seen: Seen, since: datetime, 
         n = len(g["eps"])
         label = s["new_episode"] if n == 1 else s["new_episodes"].format(count=n)
         seen.add(g["keys"])
-        found.append((g["newest"], Card(g["sid"], g["sid"], g["name"], label, s["new_badge"], keys=frozenset(g["keys"]))))
+        found.append((g["newest"], Card(g["sid"], g["sid"], g["name"], g["src"], label, s["new_badge"],
+                                        keys=frozenset(g["keys"]))))
 
     found.sort(key=lambda x: x[0], reverse=True)
     return [c for _, c in found[:MAX_NEW]]
@@ -354,7 +438,8 @@ def _recommendations(ctx: Context, lib: Library, seen: Seen, history: set[str], 
     for it in picked:
         genres = sorted(it.get("Genres") or [], key=lambda g: affinity[g], reverse=True)
         sub = " · ".join(x for x in (_year(it), genres[0] if genres else "") if x)
-        cards.append(Card(it["Id"], it["Id"], it.get("Name", ""), sub, s["reco_badge"], keys=it["_keys"]))
+        cards.append(Card(it["Id"], it["Id"], it.get("Name", ""), it.get("_src", "jellyfin"), sub,
+                          s["reco_badge"], keys=it["_keys"]))
     return cards
 
 
@@ -372,10 +457,10 @@ def _rewatch(ctx: Context, lib: Library, seen: Seen, history: set[str], rnd: ran
     candidates: list[tuple[float, dict]] = []
     handled: set[str] = set()
     for it in lib.items:
-        if it.get("Type") != "Movie" or norm_id(it["Id"]) in handled:
+        if it.get("Type") != "Movie" or uid(it) in handled:
             continue
         group = [it] + lib.copies(it)
-        handled |= {norm_id(c["Id"]) for c in group}
+        handled |= {uid(c) for c in group}
         played = [c for c in group if _user_data(c).get("Played") or _user_data(c).get("PlayCount")]
         if not played:
             continue
@@ -397,7 +482,8 @@ def _rewatch(ctx: Context, lib: Library, seen: Seen, history: set[str], rnd: ran
     for it in _pick_unique(rnd, candidates, count, seen):
         last = it.get("_last")
         badge = s["rewatch_last"].format(date=format_month(last.astimezone(ctx.tz), lang)) if last else s["rewatch_badge"]
-        cards.append(Card(it["Id"], it["Id"], it.get("Name", ""), _year(it), badge, keys=it["_keys_all"]))
+        cards.append(Card(it["Id"], it["Id"], it.get("Name", ""), it.get("_src", "jellyfin"), _year(it), badge,
+                          keys=it["_keys_all"]))
     return cards
 
 
@@ -414,17 +500,18 @@ def _pick_unique(rnd: random.Random, pool: list[tuple[float, dict]], want: int, 
     return out
 
 
-def build_digest(ctx: Context, user_id: str, user_name: str, since: datetime) -> Digest:
+def build_digest(ctx: Context, accounts, person_id: str, user_name: str, since: datetime) -> Digest:
+    """`accounts`: [(source, user id)] - one entry per media server this mail covers."""
     lang = ctx.settings.get("language", "de")
-    lib = Library(ctx.jf.library(user_id))
+    lib = Library([it for src, user in accounts for it in src.library(user)])
     seen = Seen()
-    digest = Digest(user_id, user_name)
-    digest.leaving = _leaving(ctx, user_id, lib, seen, lang)
-    digest.new = _new(ctx, user_id, lib, seen, since, lang)
+    digest = Digest(str(person_id), user_name, sources=[src.key for src, _ in accounts])
+    digest.leaving = _leaving(ctx, accounts, lib, seen, lang)
+    digest.new = _new(ctx, accounts, lib, seen, since, lang)
 
-    history = db.recent_suggestions(user_id, _int(ctx.settings, "suggestion_cooldown_days", 90))
-    # Same picks for the same user on the same day, so preview and sent mail match.
-    rnd = random.Random(f"{user_id}:{datetime.now(ctx.tz).date().isoformat()}")
+    history = db.recent_suggestions(str(person_id), _int(ctx.settings, "suggestion_cooldown_days", 90))
+    # Same picks for the same person on the same day, so preview and sent mail match.
+    rnd = random.Random(f"{person_id}:{datetime.now(ctx.tz).date().isoformat()}")
     digest.reco = _recommendations(ctx, lib, seen, history, rnd, lang)
     digest.rewatch = _rewatch(ctx, lib, seen, history, rnd, lang)
     return digest
@@ -440,15 +527,15 @@ def _cache_dir() -> Path:
     return p
 
 
-def poster(jf: Jellyfin, item_id: str) -> bytes | None:
-    """Return a small JPEG poster for `item_id`, cached on disk."""
+def poster(source, item_id: str) -> bytes | None:
+    """Return a small JPEG poster for `item_id` on `source`, cached on disk."""
     safe = "".join(ch for ch in item_id if ch.isalnum())
     if not safe:
         return None
-    path = _cache_dir() / f"{safe}.jpg"
+    path = _cache_dir() / f"{source.key}-{safe}.jpg"
     if path.exists() and time.time() - path.stat().st_mtime < POSTER_CACHE_DAYS * 86400:
         return path.read_bytes()
-    raw = jf.image(safe, max_width=POSTER_WIDTH * 2)
+    raw = source.image(safe, max_width=POSTER_WIDTH * 2)
     if not raw:
         return None
     try:
@@ -469,15 +556,13 @@ def poster(jf: Jellyfin, item_id: str) -> bytes | None:
 # rendering
 # --------------------------------------------------------------------------
 
-def deep_link(settings: dict, server_id: str, item_id: str) -> str:
-    base = (settings.get("jellyfin_public_url") or settings.get("jellyfin_url") or "").rstrip("/")
-    link = f"{base}/web/#/details?id={item_id}"
-    return f"{link}&serverId={server_id}" if server_id else link
+def server_title(digest: Digest, ctx: Context) -> str:
+    return " & ".join(ctx.sources[k].label for k in digest.sources if k in ctx.sources) or "Jellyfin"
 
 
-def subject(digest: Digest, settings: dict) -> str:
-    s = t(settings.get("language", "de"))
-    server = settings.get("server_name") or "Jellyfin"
+def subject(digest: Digest, ctx: Context) -> str:
+    s = t(ctx.settings.get("language", "de"))
+    server = server_title(digest, ctx)
     if digest.leaving:
         return s["subject"].format(server=server, leaving=len(digest.leaving))
     if digest.new:
@@ -487,15 +572,13 @@ def subject(digest: Digest, settings: dict) -> str:
 
 def render(digest: Digest, ctx: Context, image_src) -> tuple[str, str]:
     """Render (html, text). `image_src(card)` returns the <img> src or None."""
-    settings = ctx.settings
-    lang = settings.get("language", "de")
+    lang = ctx.settings.get("language", "de")
     s = t(lang)
-    server = settings.get("server_name") or "Jellyfin"
-    base = (settings.get("jellyfin_public_url") or settings.get("jellyfin_url") or "").rstrip("/")
+    used = [ctx.sources[k] for k in digest.sources if k in ctx.sources]
     data = dict(
         s=s,
         lang=lang,
-        server=server,
+        server=server_title(digest, ctx),
         name=digest.user_name,
         sections=[
             ("leaving", s["leaving_title"], s["leaving_text"], digest.leaving),
@@ -504,96 +587,104 @@ def render(digest: Digest, ctx: Context, image_src) -> tuple[str, str]:
             ("rewatch", s["rewatch_title"], s["rewatch_text"], digest.rewatch),
         ],
         colors=SECTION_COLORS,
-        link=lambda c: deep_link(settings, ctx.server_id, c.item_id),
+        link=lambda c: ctx.sources[c.src].link(c.item_id),
         img=image_src,
-        server_url=f"{base}/web/" if base else "",
-        subject=subject(digest, settings),
+        multi=len(used) > 1,
+        labels={src.key: src.product for src in used},
+        server_links=[(s["open_server"].format(server=src.label), src.home_url()) for src in used],
+        subject=subject(digest, ctx),
     )
     return _env.get_template("digest.html").render(**data), _env.get_template("digest.txt").render(**data)
 
 
 def cid_for(card: Card) -> str:
-    return f"poster-{card.poster_id}@lastcall"
+    return f"poster-{card.src}-{card.poster_id}@lastcall"
 
 
 # --------------------------------------------------------------------------
 # sending
 # --------------------------------------------------------------------------
 
-def _since(recipient, settings: dict) -> datetime:
-    last = parse_dt(recipient["last_sent"]) if recipient["last_sent"] else None
+def _since(person, settings: dict) -> datetime:
+    last = parse_dt(person["last_sent"]) if person["last_sent"] else None
     if last:
         return last
     days = int(settings.get("new_lookback_days") or 7)
     return datetime.now(timezone.utc) - timedelta(days=days)
 
 
-def send_to(ctx: Context, recipient) -> str:
+def digest_for(ctx: Context, person) -> Digest:
+    accounts, problems = accounts_for(person, ctx)
+    if not accounts:
+        raise ApiError("; ".join(problems) or "no media server account linked")
+    if problems:
+        log.warning("%s: %s", person["name"], "; ".join(problems))
+    return build_digest(ctx, accounts, person["id"], person["name"], _since(person, ctx.settings))
+
+
+def send_to(ctx: Context, person) -> str:
     """Build and send one digest. Returns a status string for the log."""
     started = db.now_iso()
-    digest = build_digest(ctx, recipient["jellyfin_id"], recipient["name"], _since(recipient, ctx.settings))
+    digest = digest_for(ctx, person)
     if not digest.should_send(ctx.settings):
-        db.log(recipient["name"], "skipped", "nothing leaving and nothing new")
+        db.log(person["name"], "skipped", "nothing leaving and nothing new")
         return "skipped"
 
     images: dict[str, bytes] = {}
 
     def src(card: Card):
-        if card.poster_id not in images:
-            data = poster(ctx.jf, card.poster_id)
+        cid = cid_for(card)
+        if cid not in images:
+            data = poster(ctx.sources[card.src], card.poster_id)
             if data is None:
                 return None
-            images[card.poster_id] = data
-        return f"cid:{cid_for(card)}"
+            images[cid] = data
+        return f"cid:{cid}"
 
     html, text = render(digest, ctx, src)
-    attachments = {f"poster-{pid}@lastcall": data for pid, data in images.items()}
-    mailer.send(ctx.settings, recipient["email"], subject(digest, ctx.settings), html, text, attachments)
-    db.mark_sent(recipient["jellyfin_id"], started)
-    # Remember what this user was shown, so later mails don't suggest it again.
+    mailer.send(ctx.settings, person["email"], subject(digest, ctx), html, text, images)
+    db.mark_sent(person["id"], started)
+    # Remember what this person was shown, so later mails don't suggest it again.
     suggested = {k for c in digest.new + digest.reco + digest.rewatch for k in c.keys}
     if suggested:
-        db.record_suggestions(recipient["jellyfin_id"], suggested)
+        db.record_suggestions(str(person["id"]), suggested)
     db.log(
-        recipient["name"], "sent",
-        f"{recipient['email']}: {len(digest.leaving)} leaving, {len(digest.new)} new, "
+        person["name"], "sent",
+        f"{person['email']} ({' + '.join(digest.sources)}): {len(digest.leaving)} leaving, {len(digest.new)} new, "
         f"{len(digest.reco)} recommended, {len(digest.rewatch)} rewatch, "
         f"{sum(len(v) for v in images.values()) // 1024} KiB images",
     )
     return "sent"
 
 
-def run(only_user: str | None = None) -> dict[str, int]:
-    """Send digests to all enabled recipients (or one). Safe to call from any thread."""
+def run(only_person: int | None = None) -> dict[str, int]:
+    """Send digests to all enabled people (or one). Safe to call from any thread."""
     if not _run_lock.acquire(blocking=False):
         db.log("-", "error", "a run is already in progress")
         return {"error": 1}
     counts = {"sent": 0, "skipped": 0, "error": 0}
     try:
         settings = db.get_settings()
-        recipients = [
-            r for r in db.list_recipients()
-            if r["enabled"] and r["email"] and (only_user is None or r["jellyfin_id"] == only_user)
+        people = [
+            p for p in db.list_people()
+            if p["enabled"] and p["email"] and (only_person is None or p["id"] == int(only_person))
         ]
-        if not recipients:
+        if not people:
             db.log("-", "skipped", "no enabled recipients with an e-mail address")
             return counts
+        ctx = open_context(settings)
+        for what, err in ctx.errors.items():
+            db.log("-", "error", f"{what}: {err}")
         try:
-            ctx = open_context(settings)
-        except (ApiError, Exception) as e:  # noqa: BLE001 - surface any setup problem in the log
-            db.log("-", "error", str(e))
-            counts["error"] += 1
-            return counts
-        try:
-            for r in recipients:
+            for p in people:
                 try:
-                    counts[send_to(ctx, r)] += 1
+                    counts[send_to(ctx, p)] += 1
                 except Exception as e:  # noqa: BLE001
-                    log.exception("sending to %s failed", r["name"])
-                    db.log(r["name"], "error", str(e))
+                    log.exception("sending to %s failed", p["name"])
+                    db.log(p["name"], "error", str(e))
                     counts["error"] += 1
         finally:
-            ctx.jf.close()
+            ctx.close()
     finally:
         _run_lock.release()
     return counts
