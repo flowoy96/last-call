@@ -24,6 +24,8 @@
 {% elif people %}
 <form method="post">
   <input type="hidden" name="csrf" value="{{ csrf }}">
+  {# Enter in a field submits the first button of a form: make that "save", not a delete button #}
+  <button type="submit" class="visually-hidden" tabindex="-1" aria-hidden="true">Save</button>
   <div class="overflow-auto">
   <table class="striped recipients">
     <thead><tr><th>Name</th><th>E-mail</th><th>Jellyfin account</th><th>Plex account</th><th>Send</th><th>Active</th><th>Last mail</th><th></th></tr></thead>
@@ -49,7 +51,11 @@
       </td>
       <td><input type="checkbox" role="switch" name="enabled_{{ p.id }}" {% if p.enabled %}checked{% endif %} aria-label="Active"></td>
       <td class="nowrap">{{ p.last_sent|localtime }}</td>
-      <td><a href="/preview?user={{ p.id }}">Preview</a></td>
+      <td class="nowrap">
+        <a href="/preview?user={{ p.id }}">Preview</a>
+        <button type="submit" formaction="/recipients/{{ p.id }}/delete" class="secondary outline small icon"
+                title="Delete {{ p.name }}" aria-label="Delete {{ p.name }}">✕</button>
+      </td>
     </tr>
     {% endfor %}
     </tbody>
@@ -58,6 +64,16 @@
   <p class="muted"><small>"Both (1 mail)" combines all linked accounts in one mail; with only one linked account it simply covers that server. Choose "Jellyfin" or "Plex" to limit the mail to one server.</small></p>
   <button type="submit">Save recipients</button>
 </form>
+<details class="danger">
+  <summary>Delete recipients</summary>
+  <p class="muted"><small>Use ✕ in a row to delete one recipient. To start over, delete everyone and import again;
+  e-mail addresses you entered by hand are lost.</small></p>
+  <form method="post" action="/recipients/delete-all" class="buttons">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label><input type="checkbox" name="confirm_delete_all"> Yes, delete all {{ people|length }} recipients</label>
+    <button type="submit" class="secondary outline small">Delete all</button>
+  </form>
+</details>
 {% else %}
 <article><p>No recipients yet. Import your users with the button above.</p></article>
 {% endif %}

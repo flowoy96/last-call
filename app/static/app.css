@@ -31,6 +31,10 @@ footer { color: var(--pico-muted-color); }
 article h6 { margin: .5rem 0 .8rem; }
 .container.wide { max-width: 1500px; padding-left: max(var(--pico-spacing), 2vw); padding-right: max(var(--pico-spacing), 2vw); }
 .recipients th, .recipients td { padding: .45rem .4rem; }
-.recipients select { margin: 0; min-width: 8.5rem; }
+.recipients select { margin: 0; min-width: 10.5rem; }
 .recipients input[type=email] { margin: 0; min-width: 13rem; }
 .recipients select[name^="servers_"] { min-width: 10.5rem; }
+button.icon { padding: .15rem .5rem; margin-left: .5rem; }
+details.danger { margin-top: 2rem; }
+details.danger form label { margin: 0; }
+.visually-hidden { position: absolute !important; left: -10000px; width: 1px; height: 1px; overflow: hidden; }

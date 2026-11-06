@@ -188,8 +188,10 @@ def sync_accounts(server: str, accounts: list[dict]) -> tuple[int, int, int]:
         for acc in accounts:
             aid = str(acc["id"])
             if aid in known:
-                c.execute(f"UPDATE people SET email = CASE WHEN email = '' THEN ? ELSE email END WHERE {col} = ?",
-                          (acc.get("email") or "", aid))
+                other = "plex_id" if col == "jellyfin_id" else "jellyfin_id"
+                c.execute(f"UPDATE people SET email = CASE WHEN email = '' THEN ? ELSE email END, "
+                          f"name = CASE WHEN {other} IS NULL THEN ? ELSE name END WHERE {col} = ?",
+                          (acc.get("email") or "", acc["name"].strip() or known[aid]["name"], aid))
                 continue
             name, email = acc["name"].strip(), (acc.get("email") or "").strip().lower()
             match = next((p for p in people if not p[col] and (

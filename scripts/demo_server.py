@@ -336,6 +336,10 @@ class PlexHandler(Handler):
         q = {k: v[0] for k, v in parse_qs(u.query).items()}
         p = u.path
         # plex.tv
+        if p == "/api/users":
+            return self.send_xml('<MediaContainer><User id="77" title="carla" username="carla"/>'
+                                 '<User id="501" title="Kids" home="1"/><User id="502" title="Grandma" home="1"/>'
+                                 '</MediaContainer>')
         if p == "/api/home/users":
             return self.send_xml(HOME_USERS_XML)
         if p == "/api/v2/resources" and self.headers.get("X-Plex-Token") == "kids-auth":
@@ -345,8 +349,12 @@ class PlexHandler(Handler):
             return self.send_json({"username": "anna", "email": "anna@example.com", "title": "Anna"})
         if p == f"/api/servers/{PLEX_MACHINE}/shared_servers":
             body = ('<?xml version="1.0" encoding="UTF-8"?><MediaContainer>'
-                    '<SharedServer id="1" username="carla" email="carla@example.com" userID="77" '
-                    'accessToken="tok-carla"><Section key="1" title="Movies" type="movie" shared="1"/></SharedServer>'
+                    '<SharedServer id="1" name="Living Room Plex" username="carla" email="carla@example.com" '
+                    'userID="77" accessToken="tok-carla"><Section key="1" title="Movies" type="movie" shared="1"/>'
+                    '</SharedServer>'
+                    # managed home user in the share list: no username, "name" is the server name
+                    '<SharedServer id="2" name="Living Room Plex" username="" email="" userID="501" '
+                    'accessToken="tok-kids"><Section key="1" title="Movies" type="movie" shared="1"/></SharedServer>'
                     '</MediaContainer>').encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/xml")

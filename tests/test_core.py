@@ -480,8 +480,15 @@ def _fake_plex():
         if path == "/api/v2/user":
             return httpx.Response(200, json={"username": "owner", "email": "owner@example.com"})
         if path.endswith("/shared_servers"):
+            # 501 is a managed home user that is also in the share list: no username,
+            # and "name" is the *server's* name (this is what real plex.tv returns)
             return xml('<MediaContainer><SharedServer userID="77" username="carla" email="carla@example.com" '
-                       'accessToken="tok-carla"/></MediaContainer>')
+                       'name="OptiPlexosaurus" accessToken="tok-carla"/>'
+                       '<SharedServer userID="501" username="" email="" name="OptiPlexosaurus" '
+                       'accessToken="tok-kids-shared"/></MediaContainer>')
+        if path == "/api/users":
+            return xml('<MediaContainer><User id="77" title="Carla C." username="carla"/>'
+                       '<User id="501" title="Kids" username=""/><User id="503" title="Friend"/></MediaContainer>')
         if path == "/api/home/users":
             return xml('<MediaContainer><User id="1" title="owner" admin="1"/>'
                        '<User id="501" title="Kids" email="" restricted="1" protected="0"/>'
@@ -515,7 +522,9 @@ def test_plex_accounts_include_home_users():
     accounts = {a["id"]: a for a in p.accounts()}
     assert set(accounts) == {"owner", "77", "501", "502"}
     assert accounts["501"]["name"] == "Kids" and accounts["501"]["email"] == "" and accounts["501"].get("home")
-    assert accounts["77"]["email"] == "carla@example.com"
+    assert accounts["77"]["email"] == "carla@example.com" and accounts["77"]["name"] == "carla"
+    assert all(a["name"] != "OptiPlexosaurus" for a in accounts.values())
+    assert accounts["502"]["name"] == "Grandma"
 
 
 def test_plex_home_user_uses_own_token_and_pin_is_reported():
@@ -523,7 +532,7 @@ def test_plex_home_user_uses_own_token_and_pin_is_reported():
     p, seen = _fake_plex()
     p.connect()
     assert p.library("501") == []
-    assert seen[-1] == "tok-kids"          # queried as the home user, not as the owner
+    assert seen[-1] == "tok-kids-shared"   # token from the share list, no switch needed
     assert p.library("77") == [] and seen[-1] == "tok-carla"
     with pytest.raises(ApiError, match="PIN"):
         p.library("502")
@@ -536,3 +545,29 @@ def test_home_user_without_email_keeps_manual_address():
     db.update_person(person["id"], "kids@example.com", True, "plex", None, "501")
     db.sync_accounts("plex", [{"id": "501", "name": "Kids", "email": ""}])
     assert db.get_person(person["id"])["email"] == "kids@example.com"
+
+
+def test_plex_home_user_switch_when_not_shared():
+    p, seen = _fake_plex()
+    p.connect()
+    p._load_shared()
+    del p._user_tokens["501"]              # not in the share list -> switch to the home user
+    p.library("501")
+    assert seen[-1] == "tok-kids"
+
+
+def test_reimport_fixes_names_of_single_server_people():
+    from app import db
+    db.sync_accounts("jellyfin", [{"id": "j1", "name": "Anna"}])
+    db.sync_accounts("plex", [{"id": "owner", "name": "Anna"}, {"id": "501", "name": "OptiPlexosaurus"}])
+    db.sync_accounts("plex", [{"id": "owner", "name": "anna_plex"}, {"id": "501", "name": "Kids"}])
+    names = {p["name"] for p in db.list_people()}
+    assert names == {"Anna", "Kids"}       # linked to both servers -> name kept; Plex-only -> fixed
+
+
+def test_delete_and_reimport():
+    from app import db
+    db.sync_accounts("plex", [{"id": "501", "name": "Kids"}])
+    db.delete_person(db.list_people()[0]["id"])
+    assert db.list_people() == []
+    assert db.sync_accounts("plex", [{"id": "501", "name": "Kids"}]) == (1, 0, 0)

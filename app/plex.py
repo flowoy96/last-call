@@ -183,9 +183,17 @@ class Plex:
                 continue
             if el.get("accessToken"):
                 self._user_tokens[uid] = el.get("accessToken")
-            shared.append({"id": uid, "name": el.get("username") or el.get("name") or el.get("email") or uid,
+            # Note: the "name" attribute of a SharedServer is the *server's* name,
+            # never use it as the user's name. Managed users have no username.
+            shared.append({"id": uid, "name": el.get("username") or el.get("email") or "",
                            "email": el.get("email") or ""})
         return shared
+
+    def _friend_titles(self) -> dict[str, str]:
+        """Display names of all users connected to the account (plex.tv/api/users)."""
+        root = ET.fromstring(self._plex_tv("/api/users", xml=True).content)
+        return {el.get("id"): (el.get("title") or el.get("username") or "")
+                for el in root.iter("User") if el.get("id")}
 
     def _home_users(self) -> list[dict]:
         """Members of the owner's Plex Home (managed users have no e-mail)."""
@@ -229,16 +237,30 @@ class Plex:
         me = self._plex_tv("/api/v2/user").json()
         owner = {"id": OWNER, "name": me.get("username") or me.get("title") or "Owner", "email": me.get("email") or ""}
         found = [owner] + self._load_shared()
-        ids = {a["id"] for a in found}
         try:
             home = self._home_users()
         except PlexTvError:
             home = []  # no Plex Home on this account
-        found += [h for h in home if h["id"] not in ids]
+        try:
+            titles = self._friend_titles()
+        except (PlexTvError, ET.ParseError):
+            titles = {}
+        by_id = {a["id"]: a for a in found}
         for h in home:
-            for a in found:
-                if a["id"] == h["id"]:
-                    a["home"] = True
+            if h["id"] in by_id:
+                # a home user that is also in the server's share list: keep the
+                # share entry (it has the token) but take the home user's name
+                acc = by_id[h["id"]]
+                acc["home"] = True
+                acc["name"] = h["name"] or acc["name"]
+                acc["email"] = acc["email"] or h["email"]
+            else:
+                found.append(h)
+                by_id[h["id"]] = h
+        for acc in found:
+            if not acc["name"] or acc["name"] == acc.get("email"):
+                acc["name"] = titles.get(acc["id"]) or acc["name"]
+            acc["name"] = acc["name"] or f"Plex user {acc['id']}"
         return found
 
     # --- items ---------------------------------------------------------------

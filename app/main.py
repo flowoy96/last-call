@@ -341,6 +341,28 @@ async def recipients(request: Request):
                 accounts={srv: _cached_accounts(srv) for srv in digest.SERVER_KEYS})
 
 
+@login_required
+async def delete_recipient(request: Request):
+    person = db.get_person(request.path_params["person_id"])
+    if person:
+        db.delete_person(person["id"])
+        flash(request, "ok", f"Deleted {person['name']}. A new import adds the account again as a new recipient.")
+    return redirect("/recipients")
+
+
+@login_required
+async def delete_all_recipients(request: Request):
+    form = await request.form()
+    if not form.get("confirm_delete_all"):
+        flash(request, "error", "Tick the confirmation box to delete all recipients.")
+        return redirect("/recipients")
+    people = db.list_people()
+    for p in people:
+        db.delete_person(p["id"])
+    flash(request, "ok", f"Deleted all {len(people)} recipients. Import your users again to start over.")
+    return redirect("/recipients")
+
+
 def _import_users(server: str) -> tuple[int, int, int]:
     s = db.get_settings()
     src = digest.open_source(server, s)
@@ -512,6 +534,8 @@ def create_app() -> Starlette:
         Route("/settings/test/{service}", test_service, methods=["POST"]),
         Route("/recipients", recipients, methods=["GET", "POST"]),
         Route("/recipients/import/{server}", import_users, methods=["POST"]),
+        Route("/recipients/{person_id:int}/delete", delete_recipient, methods=["POST"]),
+        Route("/recipients/delete-all", delete_all_recipients, methods=["POST"]),
         Route("/preview", preview),
         Route("/preview/frame", preview_frame),
         Route("/preview/send", preview_send, methods=["POST"]),
