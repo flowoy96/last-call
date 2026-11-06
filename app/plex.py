@@ -4,7 +4,9 @@ Plex items are normalised into the Jellyfin-style dicts the digest code uses
 (Id, Name, Type, ProviderIds, Genres, UserData, ...).
 
 Per-user data: plex.tv hands out an access token per shared user and server
-(`/api/servers/{machineId}/shared_servers`). Queries made with that token only
+(`/api/servers/{machineId}/shared_servers`). Plex Home members (e.g. managed
+users) get theirs by switching to the user (`/api/home/users/{id}/switch`) and
+reading the server from their resources. Queries made with such a token only
 see the libraries shared with the user and return *their* watch state, the
 same way Jellyfin's `userId` parameter does. The owner uses the admin token.
 """
@@ -93,8 +95,10 @@ class Plex:
         self.label = label or "Plex"
         self.machine_id = ""
         self._user_tokens: dict[str, str] = {}
+        self._shared_loaded = False
         self._sections: dict[str, list[dict]] = {}
         self.client = httpx.Client(base_url=self.base, timeout=TIMEOUT, headers=self._headers())
+        self.tv = httpx.Client(base_url=PLEX_TV, timeout=TIMEOUT, headers=self._headers())
 
     def _headers(self) -> dict:
         return {
@@ -106,6 +110,7 @@ class Plex:
 
     def close(self) -> None:
         self.client.close()
+        self.tv.close()
 
     def __enter__(self):
         return self
@@ -118,11 +123,12 @@ class Plex:
     def _token(self, user: str) -> str:
         if user in ("", OWNER):
             return self.token
-        if not self._user_tokens:
+        user = str(user)
+        if not self._shared_loaded:
             self._load_shared()
-        tok = self._user_tokens.get(str(user))
+        tok = self._user_tokens.get(user)
         if not tok:
-            raise ApiError(f"Plex user {user} has no access to this server (any more)")
+            tok = self._user_tokens[user] = self._home_user_token(user)
         return tok
 
     def _get(self, path: str, user: str = OWNER, params: dict | None = None, ok404: bool = False) -> dict:
@@ -137,11 +143,17 @@ class Plex:
             raise ApiError(f"Plex request {path} failed: {_redact(str(e))}") from None
         return (r.json() or {}).get("MediaContainer", {})
 
-    def _plex_tv(self, path: str) -> httpx.Response:
+    def _plex_tv(self, path: str, method: str = "GET", token: str | None = None, xml: bool = False,
+                 params: dict | None = None) -> httpx.Response:
+        headers = {"X-Plex-Token": token or self.token}
+        if xml:  # the v1 API answers in XML; ask for it explicitly
+            headers["Accept"] = "application/xml"
         try:
-            r = httpx.get(f"{PLEX_TV}{path}", timeout=TIMEOUT,
-                          headers={**self._headers(), "X-Plex-Token": self.token})
+            r = self.tv.request(method, path, headers=headers, params=params)
             r.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            raise PlexTvError(e.response.status_code, f"plex.tv request {path} failed: "
+                                                      f"HTTP {e.response.status_code}") from None
         except httpx.HTTPError as e:
             raise ApiError(f"plex.tv request {path} failed: {_redact(str(e))}") from None
         return r
@@ -162,7 +174,8 @@ class Plex:
     def _load_shared(self) -> list[dict]:
         if not self.machine_id:
             self.connect()
-        root = ET.fromstring(self._plex_tv(f"/api/servers/{self.machine_id}/shared_servers").content)
+        root = ET.fromstring(self._plex_tv(f"/api/servers/{self.machine_id}/shared_servers", xml=True).content)
+        self._shared_loaded = True
         shared = []
         for el in root.iter("SharedServer"):
             uid = el.get("userID")
@@ -174,11 +187,59 @@ class Plex:
                            "email": el.get("email") or ""})
         return shared
 
+    def _home_users(self) -> list[dict]:
+        """Members of the owner's Plex Home (managed users have no e-mail)."""
+        root = ET.fromstring(self._plex_tv("/api/home/users", xml=True).content)
+        users = []
+        for el in root.iter("User"):
+            if el.get("admin") == "1" or not el.get("id"):
+                continue  # the owner
+            users.append({"id": el.get("id"), "name": el.get("title") or el.get("username") or el.get("id"),
+                          "email": el.get("email") or "", "home": True,
+                          "protected": el.get("protected") == "1"})
+        return users
+
+    def _home_user_token(self, user: str) -> str:
+        """Server access token for a Plex Home user: switch to the user on plex.tv,
+        then look up this server among the user's resources."""
+        try:
+            r = self._plex_tv(f"/api/home/users/{user}/switch", method="POST", xml=True)
+        except PlexTvError as e:
+            if e.status in (401, 403):
+                raise ApiError("this Plex Home user has a PIN, so Last Call cannot read their Plex library. "
+                               "Remove the PIN in Plex (Settings > Plex Home) or choose \"Jellyfin\" "
+                               "for this person") from None
+            if e.status == 404:
+                raise ApiError(f"Plex user {user} has no access to this server (any more)") from None
+            raise
+        user_token = _xml_or_json_attr(r, "authenticationToken", "authToken")
+        if not user_token:
+            raise ApiError(f"plex.tv did not return a token for Plex Home user {user}")
+        if not self.machine_id:
+            self.connect()
+        resources = self._plex_tv("/api/v2/resources", token=user_token, params={"includeHttps": 1}).json()
+        for res in resources if isinstance(resources, list) else []:
+            if res.get("clientIdentifier") == self.machine_id and res.get("accessToken"):
+                return res["accessToken"]
+        raise ApiError(f"Plex Home user {user} has no access to this server")
+
     def accounts(self) -> list[dict]:
-        """Owner plus every user this server is shared with (with e-mail from plex.tv)."""
+        """Owner, every user this server is shared with (with e-mail from plex.tv)
+        and the members of the owner's Plex Home."""
         me = self._plex_tv("/api/v2/user").json()
         owner = {"id": OWNER, "name": me.get("username") or me.get("title") or "Owner", "email": me.get("email") or ""}
-        return [owner] + self._load_shared()
+        found = [owner] + self._load_shared()
+        ids = {a["id"] for a in found}
+        try:
+            home = self._home_users()
+        except PlexTvError:
+            home = []  # no Plex Home on this account
+        found += [h for h in home if h["id"] not in ids]
+        for h in home:
+            for a in found:
+                if a["id"] == h["id"]:
+                    a["home"] = True
+        return found
 
     # --- items ---------------------------------------------------------------
 
@@ -248,6 +309,20 @@ class Plex:
 
     def home_url(self) -> str:
         return f"{self._web()}#!/media/{self.machine_id}/com.plexapp.plugins.library" if self.machine_id else self._web()
+
+
+class PlexTvError(ApiError):
+    def __init__(self, status: int, message: str):
+        super().__init__(message)
+        self.status = status
+
+
+def _xml_or_json_attr(r: httpx.Response, *names: str) -> str:
+    if "json" in r.headers.get("content-type", ""):
+        data = r.json() or {}
+        return next((data[n] for n in names if data.get(n)), "")
+    root = ET.fromstring(r.content)
+    return next((root.get(n) for n in names if root.get(n)), "")
 
 
 def _redact(text: str) -> str:

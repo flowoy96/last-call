@@ -349,7 +349,7 @@ def _import_users(server: str) -> tuple[int, int, int]:
     finally:
         src.close()
     db.set_settings({f"accounts_{server}": json.dumps(
-        [{"id": str(a["id"]), "name": a["name"]} for a in accounts])})
+        [{"id": str(a["id"]), "name": a["name"] + (" (Home)" if a.get("home") else "")} for a in accounts])})
     return db.sync_accounts(server, accounts)
 
 
@@ -362,6 +362,10 @@ async def import_users(request: Request):
         added, linked, removed = await run_in_threadpool(_import_users, server)
         flash(request, "ok", f"Imported from {server.capitalize()}: {added} new, {linked} linked to existing "
                              f"recipients by name/e-mail, {removed} removed.")
+        missing = [p["name"] for p in db.list_people() if not p["email"]]
+        if missing:
+            flash(request, "info", "No e-mail address yet for: " + ", ".join(missing)
+                  + ". Enter it below; imports never overwrite an address you entered.")
     except Exception as e:  # noqa: BLE001
         flash(request, "error", str(e))
     return redirect("/recipients")

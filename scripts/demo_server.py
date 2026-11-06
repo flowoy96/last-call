@@ -258,8 +258,13 @@ class Handler(BaseHTTPRequestHandler):
 # --------------------------------------------------------------------------
 
 PLEX_MACHINE = "demo-plex-machine"
-PLEX_TOKENS = {"demo-plex-token": "anna", "tok-carla": "carla"}
-PLEX_LIBS = {"anna": {"1", "2"}, "carla": {"1"}}
+PLEX_TOKENS = {"demo-plex-token": "anna", "tok-carla": "carla", "tok-kids": "kids"}
+PLEX_LIBS = {"anna": {"1", "2"}, "carla": {"1"}, "kids": {"1"}}
+# Plex Home: "Kids" is a managed user without e-mail, "Grandma" is protected by a PIN
+HOME_USERS_XML = ('<?xml version="1.0" encoding="UTF-8"?><MediaContainer>'
+                  '<User id="1" title="anna" admin="1" email="anna@example.com"/>'
+                  '<User id="501" title="Kids" email="" restricted="1" protected="0" home="1"/>'
+                  '<User id="502" title="Grandma" email="" protected="1" home="1"/></MediaContainer>')
 
 # (title, type, year, section, days since added) - TMDb ids match the Jellyfin catalog by title
 PLEX_CATALOG = [
@@ -310,11 +315,32 @@ def plex_view(item: dict, user: str) -> dict:
 
 
 class PlexHandler(Handler):
+    def send_xml(self, text: str, status: int = 200):
+        body = text.encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/xml")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_POST(self):  # noqa: N802
+        p = urlparse(self.path).path
+        if p == "/api/home/users/501/switch":
+            return self.send_xml('<user id="501" authenticationToken="kids-auth"/>')
+        if p == "/api/home/users/502/switch":
+            return self.send_json({"error": "PIN required"}, 401)
+        self.send_json({"error": "not found"}, 404)
+
     def do_GET(self):  # noqa: N802
         u = urlparse(self.path)
         q = {k: v[0] for k, v in parse_qs(u.query).items()}
         p = u.path
         # plex.tv
+        if p == "/api/home/users":
+            return self.send_xml(HOME_USERS_XML)
+        if p == "/api/v2/resources" and self.headers.get("X-Plex-Token") == "kids-auth":
+            return self.send_json([{"name": "Living Room Plex", "clientIdentifier": PLEX_MACHINE,
+                                    "accessToken": "tok-kids"}])
         if p == "/api/v2/user":
             return self.send_json({"username": "anna", "email": "anna@example.com", "title": "Anna"})
         if p == f"/api/servers/{PLEX_MACHINE}/shared_servers":

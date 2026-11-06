@@ -467,3 +467,72 @@ def test_recommendations_prefer_taste_on_every_day(fixed_day):
         d = build(make_ctx(LibJF(items), reco_count="3", rewatch_enabled="0"))
         worst = min(worst, sum(c.title.startswith("Thriller") for c in d.reco))
     assert worst >= 2
+
+
+def _fake_plex():
+    """Plex client wired to fake plex.tv + server transports. Returns (plex, seen server tokens)."""
+    from app.plex import Plex
+    seen_tokens = []
+    xml = lambda body: httpx.Response(200, headers={"content-type": "application/xml"}, content=body.encode())
+
+    def tv(request):
+        path, tok = request.url.path, request.headers.get("X-Plex-Token")
+        if path == "/api/v2/user":
+            return httpx.Response(200, json={"username": "owner", "email": "owner@example.com"})
+        if path.endswith("/shared_servers"):
+            return xml('<MediaContainer><SharedServer userID="77" username="carla" email="carla@example.com" '
+                       'accessToken="tok-carla"/></MediaContainer>')
+        if path == "/api/home/users":
+            return xml('<MediaContainer><User id="1" title="owner" admin="1"/>'
+                       '<User id="501" title="Kids" email="" restricted="1" protected="0"/>'
+                       '<User id="502" title="Grandma" email="" protected="1"/></MediaContainer>')
+        if path == "/api/home/users/501/switch" and request.method == "POST":
+            return xml('<user authenticationToken="kids-auth"/>')
+        if path == "/api/home/users/502/switch":
+            return httpx.Response(401)
+        if path == "/api/v2/resources" and tok == "kids-auth":
+            return httpx.Response(200, json=[{"clientIdentifier": "other", "accessToken": "x"},
+                                             {"clientIdentifier": "mid", "accessToken": "tok-kids"}])
+        return httpx.Response(404)
+
+    def server(request):
+        seen_tokens.append(request.url.params.get("X-Plex-Token"))
+        if request.url.path == "/":
+            return httpx.Response(200, json={"MediaContainer": {"machineIdentifier": "mid", "friendlyName": "P"}})
+        if request.url.path == "/library/sections":
+            return httpx.Response(200, json={"MediaContainer": {"Directory": []}})
+        return httpx.Response(404)
+
+    p = Plex("http://plex:32400", "owner-token")
+    p.tv = httpx.Client(base_url="https://plex.tv", transport=httpx.MockTransport(tv))
+    p.client = httpx.Client(base_url="http://plex:32400", transport=httpx.MockTransport(server))
+    return p, seen_tokens
+
+
+def test_plex_accounts_include_home_users():
+    p, _ = _fake_plex()
+    p.connect()
+    accounts = {a["id"]: a for a in p.accounts()}
+    assert set(accounts) == {"owner", "77", "501", "502"}
+    assert accounts["501"]["name"] == "Kids" and accounts["501"]["email"] == "" and accounts["501"].get("home")
+    assert accounts["77"]["email"] == "carla@example.com"
+
+
+def test_plex_home_user_uses_own_token_and_pin_is_reported():
+    from app.clients import ApiError
+    p, seen = _fake_plex()
+    p.connect()
+    assert p.library("501") == []
+    assert seen[-1] == "tok-kids"          # queried as the home user, not as the owner
+    assert p.library("77") == [] and seen[-1] == "tok-carla"
+    with pytest.raises(ApiError, match="PIN"):
+        p.library("502")
+
+
+def test_home_user_without_email_keeps_manual_address():
+    from app import db
+    db.sync_accounts("plex", [{"id": "501", "name": "Kids", "email": ""}])
+    person = db.list_people()[0]
+    db.update_person(person["id"], "kids@example.com", True, "plex", None, "501")
+    db.sync_accounts("plex", [{"id": "501", "name": "Kids", "email": ""}])
+    assert db.get_person(person["id"])["email"] == "kids@example.com"
