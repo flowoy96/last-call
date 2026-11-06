@@ -236,7 +236,16 @@ def test_rewatch_only_long_ago_and_no_duplicates():
     assert d.rewatch[0].badge.startswith("Last seen")
 
 
-def test_recommendations_match_taste_and_skip_watched():
+@pytest.fixture
+def fixed_day(monkeypatch):
+    """Make the daily random seed independent of today's date."""
+    from app import digest
+    state = {"day": "2026-01-01"}
+    monkeypatch.setattr(digest, "daily_seed", lambda pid, tz: f"{pid}:{state['day']}")
+    return state
+
+
+def test_recommendations_match_taste_and_skip_watched(fixed_day):
     items = [movie("w1", "Seen Thriller", "30", 500, genres=["Thriller"], Played=True, PlayCount=1,
                    LastPlayedDate=_iso(10))]
     items += [movie(f"t{i}", f"Thriller {i}", f"3{i}1", 500, genres=["Thriller"]) for i in range(3)]
@@ -253,7 +262,7 @@ def test_recommendations_match_taste_and_skip_watched():
     assert sum(t.startswith("Thriller") for t in titles) >= 2  # taste wins over random
 
 
-def test_suggestion_cooldown():
+def test_suggestion_cooldown(fixed_day):
     from app import db
     items = [movie(f"m{i}", f"Movie {i}", str(100 + i), 500) for i in range(3)]
     db.record_suggestions("1", {"Movie:tmdb:100", "Movie:tmdb:101"})
@@ -444,3 +453,17 @@ def test_migration_from_v1(tmp_path, monkeypatch):
         ("Anna", "anna@example.com", 1, "jf-1", "both")
     with db.connect() as c:
         assert c.execute("SELECT user_id FROM suggestions").fetchone()[0] == str(p["id"])
+
+
+def test_recommendations_prefer_taste_on_every_day(fixed_day):
+    """Weighted randomness must not let unrelated genres win on unlucky days."""
+    items = [movie("w1", "Seen Thriller", "30", 500, genres=["Thriller"], Played=True, PlayCount=1,
+                   LastPlayedDate=_iso(10))]
+    items += [movie(f"t{i}", f"Thriller {i}", f"3{i}1", 500, genres=["Thriller"]) for i in range(3)]
+    items += [movie(f"r{i}", f"Romance {i}", f"3{i}2", 500, genres=["Romance"], rating=6.0) for i in range(3)]
+    worst = 3
+    for day in range(365):
+        fixed_day["day"] = (date(2026, 1, 1) + timedelta(days=day)).isoformat()
+        d = build(make_ctx(LibJF(items), reco_count="3", rewatch_enabled="0"))
+        worst = min(worst, sum(c.title.startswith("Thriller") for c in d.reco))
+    assert worst >= 2

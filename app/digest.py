@@ -423,7 +423,9 @@ def _recommendations(ctx: Context, lib: Library, seen: Seen, history: set[str], 
         genres = it.get("Genres") or []
         match = sum(affinity[g] for g in genres) / total / math.sqrt(max(len(genres), 1))
         rating = float(it.get("CommunityRating") or 6.0) / 10.0
-        pools[it["Type"]].append((0.05 + 3.0 * match + 0.5 * rating, it))
+        # Squared so that taste clearly dominates: a strong genre match is ~100x
+        # more likely to be picked than an unrelated title, but not certain.
+        pools[it["Type"]].append(((0.05 + 3.0 * match + 0.5 * rating) ** 2, it))
 
     picked: list[dict] = []
     movies_wanted = math.ceil(count / 2)
@@ -500,6 +502,11 @@ def _pick_unique(rnd: random.Random, pool: list[tuple[float, dict]], want: int, 
     return out
 
 
+def daily_seed(person_id, tz) -> str:
+    """Same picks for the same person on the same day (preview == sent mail)."""
+    return f"{person_id}:{datetime.now(tz).date().isoformat()}"
+
+
 def build_digest(ctx: Context, accounts, person_id: str, user_name: str, since: datetime) -> Digest:
     """`accounts`: [(source, user id)] - one entry per media server this mail covers."""
     lang = ctx.settings.get("language", "de")
@@ -511,7 +518,7 @@ def build_digest(ctx: Context, accounts, person_id: str, user_name: str, since: 
 
     history = db.recent_suggestions(str(person_id), _int(ctx.settings, "suggestion_cooldown_days", 90))
     # Same picks for the same person on the same day, so preview and sent mail match.
-    rnd = random.Random(f"{person_id}:{datetime.now(ctx.tz).date().isoformat()}")
+    rnd = random.Random(daily_seed(person_id, ctx.tz))
     digest.reco = _recommendations(ctx, lib, seen, history, rnd, lang)
     digest.rewatch = _rewatch(ctx, lib, seen, history, rnd, lang)
     return digest
