@@ -157,7 +157,7 @@ Nein. Last Call liest nur. Gelöscht wird ausschließlich von Maintainerr.
 Nicht eingebaut, um die App schlank zu halten. Stell Last Call hinter deinen Reverse Proxy mit Forward Auth (Authentik-Proxy-Provider, Authelia …). Der eingebaute Admin-Login bleibt zusätzlich aktiv.
 
 **Welche Plex-User werden importiert?**
-Der Besitzer des Servers und alle User, mit denen der Server geteilt ist (laut plex.tv). Plex-Home-User ohne eigenes plex.tv-Konto werden nicht importiert.
+Der Besitzer des Servers, alle User, mit denen der Server geteilt ist, und die Mitglieder deines **Plex Home** (auch verwaltete Benutzer, z. B. Kinder-Konten). Home-User sind in der Auswahl mit „(Home)“ markiert. Sie haben bei plex.tv keine E-Mail-Adresse, du trägst sie in der Empfängerliste von Hand ein. Ein späterer Import überschreibt sie nicht. Last Call liest die Bibliothek eines Home-Users mit dessen eigenem Zugriff, also mit seinen Freigaben, Altersbeschränkungen und seinem Wiedergabestatus. **Ausnahme:** Home-User mit PIN kann Last Call nicht lesen. Entferne dort die PIN oder wähle für die Person „Jellyfin“.
 
 **Warum ist die Weboberfläche englisch?**
 Damit der Code klein bleibt. Die E-Mails gibt es auf Deutsch und Englisch.
@@ -280,7 +280,7 @@ No. It only reads data. Deleting is done exclusively by Maintainerr.
 Not built in, to keep the app small. Put Last Call behind your reverse proxy with forward auth (Authentik proxy provider, Authelia, …). The built-in admin login stays active as well.
 
 **Which Plex users are imported?**
-The server owner and every user the server is shared with (according to plex.tv). Plex Home users without their own plex.tv account are not imported.
+The server owner, every user the server is shared with, and the members of your **Plex Home** (including managed users such as kids' accounts). Home users are marked "(Home)" in the account list. They have no e-mail address on plex.tv, so you enter it by hand on the Recipients page, and later imports never overwrite it. Last Call reads a home user's library with that user's own access, so their library sharing, age restrictions and watch state apply. **Exception:** Last Call cannot read home users protected by a PIN. Remove the PIN or choose "Jellyfin" for that person.
 
 **Why is the web UI in English?**
 To keep the code small. The e-mails are available in German and English.
